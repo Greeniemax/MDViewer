@@ -1,6 +1,6 @@
 # MDViewer
 
-A modern, dual-pane markdown editor and viewer with native text-to-speech capabilities for macOS.
+A modern, dual-pane markdown editor and viewer with native text-to-speech capabilities for macOS and Windows.
 
 ## Features
 
@@ -23,7 +23,9 @@ A modern, dual-pane markdown editor and viewer with native text-to-speech capabi
 - Click any word to select reading start position
 
 ### 🔊 Text-to-Speech (TTS)
-- Native macOS TTS integration using the `say` command
+- Native TTS integration
+  - **macOS**: Uses the native `say` command
+  - **Windows**: Uses Windows Speech API (SAPI) via PowerShell
 - Multiple voice options
 - Adjustable speech rate (100-250 words per minute)
 - Click-to-select reading position
@@ -32,8 +34,14 @@ A modern, dual-pane markdown editor and viewer with native text-to-speech capabi
 
 ## Requirements
 
+### macOS
 - macOS 10.13 or later
 - Native macOS text-to-speech (pre-installed)
+
+### Windows
+- Windows 10 or later
+- Windows Speech API (SAPI) - pre-installed with Windows
+- PowerShell 5.0 or later (pre-installed with Windows 10+)
 
 ## Installation
 
@@ -45,12 +53,24 @@ A modern, dual-pane markdown editor and viewer with native text-to-speech capabi
    go install github.com/wailsapp/wails/v2/cmd/wails@latest
    ```
 3. Clone and build:
+   
+   **On macOS/Linux:**
    ```bash
    git clone <repository-url>
    cd MDViewer
    ./build.sh
    ```
-4. The built app will be in `build/bin/MDViewer.app`
+   
+   **On Windows (PowerShell):**
+   ```powershell
+   git clone <repository-url>
+   cd MDViewer
+   wails build
+   ```
+
+4. The built app will be in:
+   - **macOS**: `build/bin/MDViewer.app`
+   - **Windows**: `build/bin/MDViewer.exe`
 
 ### Running in Development Mode
 
@@ -60,8 +80,9 @@ wails dev
 
 ### Quick Scripts
 
-Two convenient shell scripts are provided:
+**macOS/Linux:**
 
+Two convenient shell scripts are provided:
 - **`./build.sh`** - Builds the production application
 - **`./run.sh`** - Launches the built application
 
@@ -69,6 +90,28 @@ Two convenient shell scripts are provided:
 # Build and run
 ./build.sh
 ./run.sh
+```
+
+**Windows:**
+
+Two convenient batch files are provided:
+- **`build.bat`** - Builds the production application
+- **`run.bat`** - Launches the built application
+
+```batch
+REM Build and run
+build.bat
+run.bat
+```
+
+Or use Wails commands directly:
+
+```powershell
+# Build
+wails build
+
+# Run in development mode
+wails dev
 ```
 
 ## Usage
@@ -101,7 +144,9 @@ Currently, all actions are toolbar-based. Future versions may include keyboard s
 - **Framework**: Wails v2.11.0
 - **Frontend**: Vanilla JavaScript, HTML5, CSS3
 - **Build Tool**: Vite
-- **TTS**: Native macOS `say` command
+- **TTS**: 
+  - macOS: Native `say` command
+  - Windows: Windows Speech API (SAPI) via PowerShell
 
 ## Project Structure
 
@@ -139,18 +184,29 @@ MDViewer/
 
 ## Known Limitations
 
-1. TTS only works on macOS (uses native `say` command)
-2. File operations use native dialogs (browser-based file access removed)
-3. Markdown rendering is custom (not using a full parser library)
-4. No collaborative editing features
-5. No syntax highlighting for code blocks (planned for future)
+1. Markdown rendering is custom (not using a full parser library)
+2. No collaborative editing features
+3. No syntax highlighting for code blocks (planned for future)
 
 ## Troubleshooting
 
 ### TTS Not Working
+
+**macOS:**
 - Ensure your Mac has text-to-speech enabled in System Preferences
 - Check that the `say` command works in Terminal: `say "Hello"`
 - Try selecting a different voice from the dropdown
+
+**Windows:**
+- Ensure PowerShell is available (pre-installed on Windows 10+)
+- Test SAPI in PowerShell:
+  ```powershell
+  Add-Type -AssemblyName System.Speech
+  $synth = New-Object System.Speech.Synthesis.SpeechSynthesizer
+  $synth.Speak("Hello")
+  ```
+- Check that you have at least one voice installed (Windows Settings > Time & Language > Speech)
+- Try running the app as Administrator if TTS fails to initialize
 
 ### File Won't Open
 - Ensure the file has a `.md`, `.markdown`, or `.txt` extension
@@ -184,7 +240,7 @@ This is a personal/educational project. Feel free to fork and modify for your ne
 ## Credits
 
 - Built with [Wails](https://wails.io)
-- Uses macOS native TTS
+- Uses native TTS on both macOS and Windows
 - Inspired by the need for accessible markdown reading tools
 
 ## Screenshot
