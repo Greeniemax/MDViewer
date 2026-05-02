@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/fsnotify/fsnotify"
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
@@ -30,6 +31,12 @@ type App struct {
 	ttsProcess  *exec.Cmd
 	ttsMutex    sync.Mutex
 	isSpeaking  bool
+
+	watchMu      sync.Mutex
+	fileWatcher  *fsnotify.Watcher
+	watchedAbs   map[string]struct{}
+	reloadTimer  map[string]*time.Timer
+	lastAppWrite map[string]time.Time
 }
 
 // NewApp creates a new App application struct
@@ -37,9 +44,32 @@ func NewApp() *App {
 	return &App{}
 }
 
+// startupFileFromArgs returns the path passed when Windows opens a file
+// (e.g. double-click .md) or the user drops a file onto the executable.
+func startupFileFromArgs() string {
+	if len(os.Args) < 2 {
+		return ""
+	}
+	path := strings.TrimSpace(os.Args[1])
+	if path == "" || strings.HasPrefix(path, "-") {
+		return ""
+	}
+	info, err := os.Stat(path)
+	if err != nil || info.IsDir() {
+		return ""
+	}
+	return filepath.Clean(path)
+}
+
 // startup is called when the app starts
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	if path := startupFileFromArgs(); path != "" {
+		if data, err := os.ReadFile(path); err == nil {
+			a.currentFile = path
+			a.content = string(data)
+		}
+	}
 }
 
 // OpenFileDialog opens a native file picker for markdown files
@@ -108,6 +138,7 @@ func (a *App) SaveFileDialog(content string) (string, error) {
 		return "", err
 	}
 
+	a.recordOwnDiskWrite(filePath)
 	a.currentFile = filePath
 	a.content = content
 
@@ -129,7 +160,18 @@ func (a *App) ReadFile(filepath string) (string, error) {
 func (a *App) SaveFile(filepath, content string) error {
 	a.currentFile = filepath
 	a.content = content
-	return os.WriteFile(filepath, []byte(content), 0644)
+	err := os.WriteFile(filepath, []byte(content), 0644)
+	if err != nil {
+		return err
+	}
+	a.recordOwnDiskWrite(filepath)
+	return nil
+}
+
+// SetActiveDocument syncs which document is active in the backend (used for save dialogs and helpers).
+func (a *App) SetActiveDocument(path string, documentContent string) {
+	a.currentFile = path
+	a.content = documentContent
 }
 
 // GetCurrentFile returns the current file path
@@ -314,12 +356,27 @@ func (a *App) getAvailableVoicesMacOS() ([]string, error) {
 	voices := []string{}
 	lines := strings.Split(string(output), "\n")
 	for _, line := range lines {
-		if strings.TrimSpace(line) != "" {
-			parts := strings.Fields(line)
-			if len(parts) > 0 {
-				voiceName := parts[0]
-				voices = append(voices, voiceName)
-			}
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.Fields(line)
+		if len(parts) == 0 {
+			continue
+		}
+		voiceName := parts[0]
+		// Build description from remaining fields (typically: locale # sample)
+		desc := ""
+		if len(parts) > 1 {
+			// Skip the voice name, include the rest
+			desc = strings.Join(parts[1:], " ")
+			// Trim any leading "#" from sample text
+			desc = strings.TrimSpace(desc)
+		}
+		if desc != "" {
+			voices = append(voices, voiceName+"|"+desc)
+		} else {
+			voices = append(voices, voiceName)
 		}
 	}
 	return voices, nil
@@ -330,17 +387,21 @@ func (a *App) getAvailableVoicesWindows() ([]string, error) {
 	psScript := `
 Add-Type -AssemblyName System.Speech
 $synth = New-Object System.Speech.Synthesis.SpeechSynthesizer
-$synth.GetInstalledVoices() | ForEach-Object { $_.VoiceInfo.Name }
+$synth.GetInstalledVoices() | ForEach-Object {
+    $name = $_.VoiceInfo.Name
+    $desc = $_.VoiceInfo.Description
+    if ($desc) { "$name|$desc" } else { $name }
+}
 $synth.Dispose()
 `
 	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", psScript)
-	
+
 	// Hide the console window on Windows
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		HideWindow:    true,
 		CreationFlags: 0x08000000, // CREATE_NO_WINDOW
 	}
-	
+
 	output, err := cmd.Output()
 	if err != nil {
 		return nil, err

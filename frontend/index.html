@@ -27,6 +27,15 @@
         <button class="btn btn-primary" id="saveBtn" disabled>
             <span>💾</span> Save
         </button>
+        <button class="btn btn-primary" id="findToolbarBtn" type="button" title="Find (Ctrl+F)">
+            <span>🔍</span> Find
+        </button>
+        <div class="menu-dropdown-wrap" id="recentMenuWrap">
+            <button class="btn btn-primary" id="recentMenuBtn" type="button" title="Recently opened files">
+                <span>📋</span> Recent
+            </button>
+            <div id="recentMenu" class="dropdown-menu" role="menu" hidden></div>
+        </div>
         
         <div style="flex: 1;"></div>
         
@@ -54,11 +63,24 @@
         </div>
     </div>
 
+    <div class="doc-tabs-row" id="docTabsRow" aria-label="Open documents">
+        <div class="doc-tabs-scroll" id="docTabsBar"></div>
+    </div>
+
     <!-- Editor Content -->
     <div class="content active" id="editorContent">
-        <div class="editor-container">
-            <div class="line-numbers" id="lineNumbers">1</div>
-            <textarea class="editor" id="editor" placeholder="Open a markdown file or start typing..."></textarea>
+        <div class="editor-workspace">
+            <div class="editor-container">
+                <div class="line-numbers" id="lineNumbers">1</div>
+                <textarea class="editor" id="editor" placeholder="Open a markdown file or start typing..."></textarea>
+            </div>
+            <aside id="findResultsPanel" class="find-results-panel" aria-hidden="true">
+                <div class="find-results-header">
+                    <span class="find-results-title" id="findResultsTitle">Find results</span>
+                    <button type="button" class="find-results-close" id="findResultsClose" aria-label="Close results">×</button>
+                </div>
+                <div class="find-results-list" id="findResultsList"></div>
+            </aside>
         </div>
     </div>
 
@@ -84,6 +106,22 @@
 
     <!-- File Input -->
     <input type="file" id="fileInput" class="file-input" accept=".md,.markdown,.txt">
+
+    <!-- Find dialog -->
+    <div id="findDialogOverlay" class="find-dialog-overlay" aria-hidden="true">
+        <div class="find-dialog" role="dialog" aria-labelledby="findDialogHeading">
+            <h3 id="findDialogHeading" class="find-dialog-heading">Find</h3>
+            <input type="text" id="findInput" class="find-input" placeholder="Search in document…" autocomplete="off" spellcheck="false">
+            <div class="find-dialog-options">
+                <label class="find-option"><input type="checkbox" id="findMatchCase"> Match case</label>
+                <label class="find-option"><input type="checkbox" id="findWholeWord"> Whole word</label>
+            </div>
+            <div class="find-dialog-actions">
+                <button type="button" class="btn btn-primary" id="findRunBtn">Find</button>
+                <button type="button" class="btn btn-secondary" id="findCancelBtn">Cancel</button>
+            </div>
+        </div>
+    </div>
 
     <script src="./src/main.js" type="module"></script>
 </body>

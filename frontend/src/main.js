@@ -1,26 +1,37 @@
 import './style.css';
 import './app.css';
+import { EventsOn } from '../wailsjs/runtime/runtime';
 import { 
     OpenFileDialog, 
     SaveFileDialog, 
     ReadFile, 
+    GetCurrentFile,
     GetContent,
+    SetActiveDocument,
+    SetWatchedFilePaths,
     SpeakLine,
     Stop, 
     IsSpeaking,
     GetAvailableVoices 
 } from '../wailsjs/go/main/App';
 
+const RECENT_FILES_KEY = 'mdviewer-recent-files-v1';
+const MAX_RECENT_FILES = 10;
+
 // State
-let currentFile = null;
 let content = '';
 let isSpeaking = false;
 let selectedLineIndex = 0;
 let currentLines = [];
 let shouldStopSpeaking = false;
 
+/** @type {{ id: number, path: string | null, title: string, value: string }[]} */
+let docTabs = [];
+let activeDocTabId = null;
+let docTabIdSeq = 0;
+
 // Elements
-const tabs = document.querySelectorAll('.tab');
+const modeTabs = document.querySelectorAll('.tab');
 const editorContent = document.getElementById('editorContent');
 const viewerContent = document.getElementById('viewerContent');
 const viewerToolbar = document.getElementById('viewerToolbar');
@@ -39,12 +50,312 @@ const wordCountEl = document.getElementById('wordCount');
 const readingStatusEl = document.getElementById('readingStatus');
 const loadingIndicator = document.getElementById('loadingIndicator');
 
-// Tab switching
-tabs.forEach(tab => {
+const findToolbarBtn = document.getElementById('findToolbarBtn');
+const findDialogOverlay = document.getElementById('findDialogOverlay');
+const findInput = document.getElementById('findInput');
+const findMatchCase = document.getElementById('findMatchCase');
+const findWholeWord = document.getElementById('findWholeWord');
+const findRunBtn = document.getElementById('findRunBtn');
+const findCancelBtn = document.getElementById('findCancelBtn');
+const findResultsPanel = document.getElementById('findResultsPanel');
+const findResultsList = document.getElementById('findResultsList');
+const findResultsTitle = document.getElementById('findResultsTitle');
+const findResultsClose = document.getElementById('findResultsClose');
+
+const docTabsBar = document.getElementById('docTabsBar');
+const recentMenuWrap = document.getElementById('recentMenuWrap');
+const recentMenuBtn = document.getElementById('recentMenuBtn');
+const recentMenu = document.getElementById('recentMenu');
+
+let findMatches = [];
+
+// Context menu
+const contextMenu = document.createElement('div');
+contextMenu.id = 'contextMenu';
+contextMenu.className = 'context-menu';
+contextMenu.innerHTML = `
+    <div class="context-menu-item" data-action="copy">Copy</div>
+    <div class="context-menu-item" data-action="cut">Cut</div>
+    <div class="context-menu-item" data-action="paste">Paste</div>
+    <div class="context-menu-item" data-action="delete">Delete</div>
+    <div class="context-menu-separator"></div>
+    <div class="context-menu-item" data-action="speak">Speak</div>
+`;
+document.body.appendChild(contextMenu);
+
+function pathsEqual(a, b) {
+    if (!a || !b) return false;
+    if (a === b) return true;
+    const na = a.replace(/\\/g, '/').toLowerCase();
+    const nb = b.replace(/\\/g, '/').toLowerCase();
+    return na === nb;
+}
+
+function fileTitleFromPath(p) {
+    if (!p) return 'Untitled';
+    const clean = p.replace(/\\/g, '/');
+    const parts = clean.split('/');
+    return parts[parts.length - 1] || 'Untitled';
+}
+
+function getActiveDocTab() {
+    return docTabs.find((t) => t.id === activeDocTabId);
+}
+
+function flushActiveTabEditor() {
+    const tab = getActiveDocTab();
+    if (tab) tab.value = editor.value;
+}
+
+function syncGoActiveDocument() {
+    const tab = getActiveDocTab();
+    if (!tab) return;
+    SetActiveDocument(tab.path || '', tab.value);
+}
+
+function shouldReuseEmptyUntitledTab() {
+    if (docTabs.length !== 1) return false;
+    const t = docTabs[0];
+    return !t.path && !t.value.trim();
+}
+
+function renderDocTabsBar() {
+    if (!docTabsBar) return;
+    docTabsBar.innerHTML = '';
+    docTabs.forEach((tab) => {
+        const el = document.createElement('div');
+        el.className = 'doc-tab' + (tab.id === activeDocTabId ? ' active' : '');
+        el.title = tab.path || 'Untitled';
+        el.dataset.docTabId = String(tab.id);
+
+        const label = document.createElement('span');
+        label.className = 'doc-tab-label';
+        label.textContent = tab.title;
+
+        const closeBtn = document.createElement('button');
+        closeBtn.type = 'button';
+        closeBtn.className = 'doc-tab-close';
+        closeBtn.setAttribute('aria-label', 'Close tab');
+        closeBtn.textContent = '×';
+
+        el.appendChild(label);
+        el.appendChild(closeBtn);
+
+        el.addEventListener('click', (e) => {
+            if (e.target.closest('.doc-tab-close')) return;
+            switchToDocTab(tab.id);
+        });
+        closeBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            closeDocTab(tab.id);
+        });
+
+        docTabsBar.appendChild(el);
+    });
+    void syncDiskWatchers();
+}
+
+async function syncDiskWatchers() {
+    const paths = [...new Set(docTabs.map((t) => t.path).filter(Boolean))];
+    try {
+        await SetWatchedFilePaths(paths);
+    } catch (e) {
+        console.error('SetWatchedFilePaths:', e);
+    }
+}
+
+function switchToDocTab(id) {
+    closeFindPanel();
+    flushActiveTabEditor();
+    activeDocTabId = id;
+    const tab = getActiveDocTab();
+    if (!tab) return;
+
+    editor.value = tab.value;
+    content = tab.value;
+    updateLineNumbers();
+    filePathEl.textContent = tab.path || 'No file open';
+    wordCountEl.textContent = `${countWords(tab.value)} words`;
+    saveBtn.disabled = false;
+    speakBtn.disabled = !tab.value.trim();
+
+    if (viewerContent.classList.contains('active')) {
+        renderMarkdown(tab.value);
+    }
+    syncGoActiveDocument();
+    renderDocTabsBar();
+}
+
+function closeDocTab(id) {
+    flushActiveTabEditor();
+    const idx = docTabs.findIndex((t) => t.id === id);
+    if (idx === -1) return;
+
+    if (docTabs.length === 1) {
+        docTabs[0].path = null;
+        docTabs[0].title = 'Untitled';
+        docTabs[0].value = '';
+        editor.value = '';
+        content = '';
+        updateLineNumbers();
+        filePathEl.textContent = 'No file open';
+        wordCountEl.textContent = '0 words';
+        speakBtn.disabled = true;
+        if (viewerContent.classList.contains('active')) {
+            renderMarkdown('');
+        }
+        syncGoActiveDocument();
+        renderDocTabsBar();
+        return;
+    }
+
+    docTabs.splice(idx, 1);
+    if (activeDocTabId === id) {
+        const next = docTabs[Math.min(idx, docTabs.length - 1)];
+        switchToDocTab(next.id);
+    } else {
+        renderDocTabsBar();
+    }
+}
+
+function openOrFocusDocument(filePath, fileContent) {
+    const existing = docTabs.find((t) => t.path && pathsEqual(t.path, filePath));
+    if (existing) {
+        addToRecentFiles(filePath);
+        switchToDocTab(existing.id);
+        return;
+    }
+
+    addToRecentFiles(filePath);
+    flushActiveTabEditor();
+
+    if (shouldReuseEmptyUntitledTab()) {
+        const t = docTabs[0];
+        t.path = filePath;
+        t.title = fileTitleFromPath(filePath);
+        t.value = fileContent;
+        switchToDocTab(t.id);
+        return;
+    }
+
+    docTabIdSeq += 1;
+    const newId = docTabIdSeq;
+    docTabs.push({
+        id: newId,
+        path: filePath,
+        title: fileTitleFromPath(filePath),
+        value: fileContent,
+    });
+    switchToDocTab(newId);
+}
+
+function ensureDefaultUntitledTab() {
+    if (docTabs.length > 0) return;
+    docTabIdSeq += 1;
+    docTabs.push({
+        id: docTabIdSeq,
+        path: null,
+        title: 'Untitled',
+        value: '',
+    });
+    activeDocTabId = docTabIdSeq;
+    editor.value = '';
+    content = '';
+    updateLineNumbers();
+    filePathEl.textContent = 'No file open';
+    wordCountEl.textContent = '0 words';
+    saveBtn.disabled = false;
+    speakBtn.disabled = true;
+    syncGoActiveDocument();
+    renderDocTabsBar();
+}
+
+function loadRecentFiles() {
+    try {
+        const raw = localStorage.getItem(RECENT_FILES_KEY);
+        const arr = raw ? JSON.parse(raw) : [];
+        return Array.isArray(arr) ? arr.filter((x) => typeof x === 'string' && x.trim()) : [];
+    } catch {
+        return [];
+    }
+}
+
+function saveRecentFiles(list) {
+    localStorage.setItem(RECENT_FILES_KEY, JSON.stringify(list.slice(0, MAX_RECENT_FILES)));
+}
+
+function addToRecentFiles(filePath) {
+    if (!filePath || !String(filePath).trim()) return;
+    let list = loadRecentFiles();
+    list = list.filter((p) => !pathsEqual(p, filePath));
+    list.unshift(filePath);
+    saveRecentFiles(list);
+    renderRecentMenu();
+}
+
+function closeRecentMenu() {
+    if (!recentMenu) return;
+    recentMenu.hidden = true;
+}
+
+function renderRecentMenu() {
+    if (!recentMenu) return;
+    recentMenu.innerHTML = '';
+    const paths = loadRecentFiles().slice(0, MAX_RECENT_FILES);
+    if (paths.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'dropdown-menu-empty';
+        empty.textContent = 'No recent files yet';
+        recentMenu.appendChild(empty);
+        return;
+    }
+    paths.forEach((p) => {
+        const item = document.createElement('div');
+        item.className = 'dropdown-menu-item';
+        item.textContent = p;
+        item.title = p;
+        item.setAttribute('role', 'menuitem');
+        item.addEventListener('click', () => openRecentFilePath(p));
+        recentMenu.appendChild(item);
+    });
+}
+
+async function openRecentFilePath(filePath) {
+    closeRecentMenu();
+    const existing = docTabs.find((t) => t.path && pathsEqual(t.path, filePath));
+    if (existing) {
+        addToRecentFiles(filePath);
+        switchToDocTab(existing.id);
+        return;
+    }
+    try {
+        const text = await ReadFile(filePath);
+        openOrFocusDocument(filePath, text);
+    } catch (err) {
+        console.error(err);
+        alert('Could not open file:\n' + filePath);
+        let list = loadRecentFiles().filter((x) => !pathsEqual(x, filePath));
+        saveRecentFiles(list);
+        renderRecentMenu();
+    }
+}
+
+recentMenuBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const open = recentMenu.hidden;
+    closeRecentMenu();
+    if (open) {
+        renderRecentMenu();
+        recentMenu.hidden = false;
+    }
+});
+
+// Tab switching (MD Editor / MD Viewer)
+modeTabs.forEach(tab => {
     tab.addEventListener('click', () => {
         const tabName = tab.dataset.tab;
         
-        tabs.forEach(t => t.classList.remove('active'));
+        modeTabs.forEach(t => t.classList.remove('active'));
         tab.classList.add('active');
         
         if (tabName === 'editor') {
@@ -68,21 +379,16 @@ openBtn.addEventListener('click', async () => {
     try {
         const filePath = await OpenFileDialog();
         if (!filePath) return;
-        
-        const fileContent = await ReadFile(filePath);
-        currentFile = filePath;
-        content = fileContent;
-        
-        editor.value = fileContent;
-        updateLineNumbers();
-        saveBtn.disabled = false;
-        
-        renderMarkdown(fileContent);
-        
-        const fileName = filePath.split('/').pop();
-        filePathEl.textContent = filePath;
-        wordCountEl.textContent = `${countWords(fileContent)} words`;
-        speakBtn.disabled = false;
+
+        const existing = docTabs.find((t) => t.path && pathsEqual(t.path, filePath));
+        if (existing) {
+            addToRecentFiles(filePath);
+            switchToDocTab(existing.id);
+            return;
+        }
+
+        const fileContent = await GetContent();
+        openOrFocusDocument(filePath, fileContent);
     } catch (err) {
         console.error('Error opening file:', err);
         alert('Error opening file: ' + err);
@@ -91,14 +397,21 @@ openBtn.addEventListener('click', async () => {
 
 saveBtn.addEventListener('click', async () => {
     try {
-        const contentToSave = editor.value;
+        flushActiveTabEditor();
+        const tab = getActiveDocTab();
+        const contentToSave = tab ? tab.value : editor.value;
         const savedPath = await SaveFileDialog(contentToSave);
         
-        if (savedPath) {
-            currentFile = savedPath;
+        if (savedPath && tab) {
+            tab.path = savedPath;
+            tab.title = fileTitleFromPath(savedPath);
+            tab.value = contentToSave;
+            editor.value = contentToSave;
             content = contentToSave;
-            const fileName = savedPath.split('/').pop();
+            addToRecentFiles(savedPath);
             filePathEl.textContent = savedPath;
+            syncGoActiveDocument();
+            renderDocTabsBar();
             alert('File saved successfully!');
         }
     } catch (err) {
@@ -118,10 +431,13 @@ function updateLineNumbers() {
 }
 
 editor.addEventListener('input', () => {
+    const tab = getActiveDocTab();
+    if (tab) tab.value = editor.value;
     updateLineNumbers();
     const text = editor.value;
     wordCountEl.textContent = `${countWords(text)} words`;
     content = text;
+    speakBtn.disabled = !text.trim();
 });
 
 editor.addEventListener('scroll', () => {
@@ -321,12 +637,30 @@ function attachClickListeners() {
     document.querySelectorAll('.clickable-line').forEach(line => {
         line.addEventListener('click', (e) => {
             selectedLineIndex = parseInt(e.currentTarget.dataset.line);
-            
+
             // Remove previous selection
             document.querySelectorAll('.clickable-line.selected').forEach(l => l.classList.remove('selected'));
             e.currentTarget.classList.add('selected');
-            
+
             console.log('Selected line:', selectedLineIndex);
+        });
+
+        line.addEventListener('dblclick', async (e) => {
+            selectedLineIndex = parseInt(e.currentTarget.dataset.line);
+
+            // Remove previous selection
+            document.querySelectorAll('.clickable-line.selected').forEach(l => l.classList.remove('selected'));
+            e.currentTarget.classList.add('selected');
+
+            // Stop current speech if any
+            if (isSpeaking) {
+                shouldStopSpeaking = true;
+                await Stop();
+                await sleep(300);
+            }
+
+            // Start speaking from this line
+            speakBtn.click();
         });
     });
 }
@@ -527,14 +861,421 @@ function clearHighlight() {
     });
 }
 
+function getSelectedText() {
+    // Check editor first if focused
+    if (document.activeElement === editor) {
+        const start = editor.selectionStart;
+        const end = editor.selectionEnd;
+        if (start !== end) {
+            return editor.value.substring(start, end);
+        }
+    }
+    // Check window selection (viewer or elsewhere)
+    const sel = window.getSelection();
+    if (sel && sel.toString().trim()) {
+        return sel.toString();
+    }
+    return '';
+}
+
+function hasEditorSelection() {
+    return document.activeElement === editor && editor.selectionStart !== editor.selectionEnd;
+}
+
+// Context menu handling
+function showContextMenu(x, y, target) {
+    const selection = getSelectedText();
+    const editorSelection = hasEditorSelection();
+    const isEditorTarget = target === editor || editor.contains(target);
+
+    const items = contextMenu.querySelectorAll('.context-menu-item');
+    items.forEach(item => {
+        const action = item.dataset.action;
+        item.classList.remove('disabled');
+        switch (action) {
+            case 'speak':
+                if (!selection) item.classList.add('disabled');
+                break;
+            case 'copy':
+                if (!selection) item.classList.add('disabled');
+                break;
+            case 'cut':
+            case 'delete':
+                if (!editorSelection) item.classList.add('disabled');
+                break;
+            case 'paste':
+                if (!isEditorTarget) item.classList.add('disabled');
+                break;
+        }
+    });
+
+    contextMenu.style.display = 'block';
+    contextMenu.style.left = x + 'px';
+    contextMenu.style.top = y + 'px';
+
+    const rect = contextMenu.getBoundingClientRect();
+    if (rect.right > window.innerWidth) {
+        contextMenu.style.left = (x - rect.width) + 'px';
+    }
+    if (rect.bottom > window.innerHeight) {
+        contextMenu.style.top = (y - rect.height) + 'px';
+    }
+}
+
+function hideContextMenu() {
+    contextMenu.style.display = 'none';
+}
+
+function isWordChar(ch) {
+    if (!ch) return false;
+    try {
+        return /^[\p{L}\p{N}_]$/u.test(ch);
+    } catch {
+        return /[A-Za-z0-9_]/.test(ch);
+    }
+}
+
+function findAllMatches(text, needle, matchCase, wholeWord) {
+    const results = [];
+    if (!needle) return results;
+
+    const hay = matchCase ? text : text.toLowerCase();
+    const n = matchCase ? needle : needle.toLowerCase();
+    const len = n.length;
+    let pos = 0;
+
+    while (pos <= hay.length - len) {
+        const idx = hay.indexOf(n, pos);
+        if (idx === -1) break;
+
+        const afterIdx = idx + len;
+        if (wholeWord) {
+            const beforeCh = idx > 0 ? text[idx - 1] : '';
+            const afterCh = afterIdx < text.length ? text[afterIdx] : '';
+            if (isWordChar(beforeCh) || isWordChar(afterCh)) {
+                pos = idx + 1;
+                continue;
+            }
+        }
+
+        results.push({ start: idx, end: afterIdx });
+        pos = afterIdx;
+    }
+    return results;
+}
+
+function lineNumberAtIndex(text, index) {
+    return text.slice(0, index).split('\n').length;
+}
+
+function buildFindSnippet(text, start, end, maxLen) {
+    const lineStart = text.lastIndexOf('\n', start - 1) + 1;
+    const lineEndIdx = text.indexOf('\n', end);
+    const lineEnd = lineEndIdx === -1 ? text.length : lineEndIdx;
+    let segment = text.slice(lineStart, lineEnd);
+    if (segment.length <= maxLen) return segment;
+
+    const rel = start - lineStart;
+    const half = Math.floor(maxLen / 2);
+    let sliceStart = Math.max(0, rel - half);
+    let sliceEnd = Math.min(segment.length, sliceStart + maxLen);
+    if (sliceEnd - sliceStart < maxLen) {
+        sliceStart = Math.max(0, sliceEnd - maxLen);
+    }
+    segment = segment.slice(sliceStart, sliceEnd);
+    const prefix = sliceStart > 0 ? '…' : '';
+    const suffix = sliceEnd < lineEnd - lineStart ? '…' : '';
+    return prefix + segment + suffix;
+}
+
+function scrollEditorToIndex(index) {
+    const style = getComputedStyle(editor);
+    const lh = parseFloat(style.lineHeight);
+    const lineHeight = Number.isFinite(lh) && lh > 0 ? lh : parseFloat(style.fontSize) * 1.6;
+    const padTop = parseFloat(style.paddingTop) || 0;
+    const textBefore = editor.value.substring(0, index);
+    const lineIndex = textBefore.split('\n').length - 1;
+    const targetTop = lineIndex * lineHeight + padTop - editor.clientHeight * 0.35;
+    editor.scrollTop = Math.max(0, targetTop);
+    lineNumbers.scrollTop = editor.scrollTop;
+}
+
+function ensureEditorTab() {
+    const editorTab = document.querySelector('.tab[data-tab="editor"]');
+    if (editorTab && !editorTab.classList.contains('active')) {
+        editorTab.click();
+    }
+}
+
+function openFindDialog() {
+    hideContextMenu();
+    let sel = '';
+    if (document.activeElement === editor) {
+        const a = editor.selectionStart;
+        const b = editor.selectionEnd;
+        if (a !== b) sel = editor.value.substring(a, b);
+    }
+    if (!sel) {
+        const winSel = window.getSelection();
+        if (winSel && winSel.toString()) sel = winSel.toString();
+    }
+    if (sel && !sel.includes('\n') && sel.length < 200) {
+        findInput.value = sel.trim();
+    }
+    findDialogOverlay.classList.add('open');
+    findDialogOverlay.setAttribute('aria-hidden', 'false');
+    setTimeout(() => {
+        findInput.focus();
+        findInput.select();
+    }, 0);
+}
+
+function closeFindDialog() {
+    findDialogOverlay.classList.remove('open');
+    findDialogOverlay.setAttribute('aria-hidden', 'true');
+}
+
+function closeFindPanel() {
+    findResultsPanel.classList.remove('open');
+    findResultsPanel.setAttribute('aria-hidden', 'true');
+    findMatches = [];
+    findResultsList.innerHTML = '';
+}
+
+function renderFindResults(matches, query) {
+    findResultsList.innerHTML = '';
+    const trimmed = query.trim();
+    findResultsTitle.textContent = matches.length
+        ? `${matches.length} result${matches.length === 1 ? '' : 's'}`
+        : 'Find results';
+
+    if (!trimmed) {
+        const empty = document.createElement('div');
+        empty.className = 'find-results-empty';
+        empty.textContent = 'Enter text to search.';
+        findResultsList.appendChild(empty);
+        return;
+    }
+
+    if (matches.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'find-results-empty';
+        empty.textContent = 'No matches.';
+        findResultsList.appendChild(empty);
+        return;
+    }
+
+    const text = editor.value;
+    matches.forEach((m, i) => {
+        const line = lineNumberAtIndex(text, m.start);
+        const el = document.createElement('div');
+        el.className = 'find-result-item';
+        el.dataset.index = String(i);
+        const lineEl = document.createElement('div');
+        lineEl.className = 'find-result-line';
+        lineEl.textContent = `Line ${line}`;
+        const sn = document.createElement('div');
+        sn.className = 'find-result-snippet';
+        sn.textContent = buildFindSnippet(text, m.start, m.end, 120);
+        el.appendChild(lineEl);
+        el.appendChild(sn);
+        el.addEventListener('click', () => focusFindResult(i));
+        findResultsList.appendChild(el);
+    });
+}
+
+function focusFindResult(index) {
+    const m = findMatches[index];
+    if (!m) return;
+
+    ensureEditorTab();
+
+    findResultsList.querySelectorAll('.find-result-item').forEach((el, i) => {
+        el.classList.toggle('active', i === index);
+    });
+
+    editor.focus();
+    editor.setSelectionRange(m.start, m.end, 'forward');
+    scrollEditorToIndex(m.start);
+}
+
+function runFind() {
+    const query = findInput.value;
+    if (!query.trim()) {
+        findInput.focus();
+        return;
+    }
+
+    const matchCase = findMatchCase.checked;
+    const wholeWord = findWholeWord.checked;
+
+    findMatches = findAllMatches(editor.value, query, matchCase, wholeWord);
+    closeFindDialog();
+
+    findResultsPanel.classList.add('open');
+    findResultsPanel.setAttribute('aria-hidden', 'false');
+    renderFindResults(findMatches, query);
+}
+
+findToolbarBtn.addEventListener('click', () => openFindDialog());
+findCancelBtn.addEventListener('click', () => closeFindDialog());
+findRunBtn.addEventListener('click', () => runFind());
+
+findDialogOverlay.addEventListener('click', (e) => {
+    if (e.target === findDialogOverlay) closeFindDialog();
+});
+
+findResultsClose.addEventListener('click', () => closeFindPanel());
+
+findInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+        e.preventDefault();
+        runFind();
+    } else if (e.key === 'Escape') {
+        e.preventDefault();
+        closeFindDialog();
+    }
+});
+
+document.addEventListener('keydown', (e) => {
+    const isFindShortcut = (e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F');
+    if (isFindShortcut) {
+        e.preventDefault();
+        openFindDialog();
+        return;
+    }
+    if (e.key === 'Escape') {
+        if (findDialogOverlay.classList.contains('open')) {
+            e.preventDefault();
+            closeFindDialog();
+            return;
+        }
+        if (findResultsPanel.classList.contains('open')) {
+            e.preventDefault();
+            closeFindPanel();
+        }
+    }
+}, true);
+
+// Prevent native context menu and show custom one
+document.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    showContextMenu(e.pageX, e.pageY, e.target);
+});
+
+document.addEventListener('click', (e) => {
+    if (!contextMenu.contains(e.target)) {
+        hideContextMenu();
+    }
+    if (recentMenuWrap && !recentMenuWrap.contains(e.target)) {
+        closeRecentMenu();
+    }
+});
+
+contextMenu.addEventListener('click', async (e) => {
+    const item = e.target.closest('.context-menu-item');
+    if (!item || item.classList.contains('disabled')) return;
+
+    const action = item.dataset.action;
+    hideContextMenu();
+
+    const selection = getSelectedText();
+    const start = editor.selectionStart;
+    const end = editor.selectionEnd;
+    const selectedText = editor.value.substring(start, end);
+
+    switch (action) {
+        case 'copy': {
+            const textToCopy = selectedText || selection;
+            if (textToCopy) {
+                try {
+                    await navigator.clipboard.writeText(textToCopy);
+                } catch (err) {
+                    console.error('Copy failed:', err);
+                }
+            }
+            break;
+        }
+        case 'cut': {
+            if (selectedText) {
+                try {
+                    await navigator.clipboard.writeText(selectedText);
+                    editor.setRangeText('', start, end);
+                    editor.dispatchEvent(new Event('input'));
+                } catch (err) {
+                    console.error('Cut failed:', err);
+                }
+            }
+            break;
+        }
+        case 'paste': {
+            if (document.activeElement !== editor) {
+                editor.focus();
+            }
+            try {
+                const text = await navigator.clipboard.readText();
+                editor.setRangeText(text, editor.selectionStart, editor.selectionEnd, 'end');
+                editor.dispatchEvent(new Event('input'));
+            } catch (err) {
+                console.error('Paste failed:', err);
+            }
+            break;
+        }
+        case 'delete': {
+            if (selectedText) {
+                editor.setRangeText('', start, end);
+                editor.dispatchEvent(new Event('input'));
+            }
+            break;
+        }
+        case 'speak': {
+            const textToSpeak = selectedText || selection;
+            if (!textToSpeak) return;
+
+            // Stop any ongoing line-by-line reading
+            if (isSpeaking) {
+                shouldStopSpeaking = true;
+                try { await Stop(); } catch (err) { /* ignore */ }
+                await sleep(200);
+            }
+
+            const voice = voiceSelect.value;
+            const rate = parseInt(rateSlider.value);
+
+            readingStatusEl.textContent = 'Speaking selection...';
+            loadingIndicator.classList.add('active');
+
+            try {
+                await SpeakLine(textToSpeak, voice || '', rate);
+            } catch (err) {
+                console.error('Speak error:', err);
+            } finally {
+                readingStatusEl.textContent = '';
+                loadingIndicator.classList.remove('active');
+            }
+            break;
+        }
+    }
+});
+
 // Voice selection
 async function loadVoices() {
     try {
         const voices = await GetAvailableVoices();
+        voiceSelect.innerHTML = '<option value="">Default Voice</option>';
         voices.forEach(voice => {
             const option = document.createElement('option');
-            option.value = voice;
-            option.textContent = voice;
+            // Backend may return "Name|Description" format
+            const sepIndex = voice.indexOf('|');
+            if (sepIndex > 0) {
+                const name = voice.substring(0, sepIndex);
+                const desc = voice.substring(sepIndex + 1);
+                option.value = name;
+                option.textContent = name + ' — ' + desc;
+            } else {
+                option.value = voice;
+                option.textContent = voice;
+            }
             voiceSelect.appendChild(option);
         });
     } catch (err) {
@@ -553,11 +1294,62 @@ if (rateSlider && rateValue) {
 updateLineNumbers();
 loadVoices();
 
-// Show welcome message
-viewer.innerHTML = `
+renderRecentMenu();
+
+EventsOn('document-disk-changed', (payload) => {
+    let data;
+    try {
+        data = typeof payload === 'string' ? JSON.parse(payload) : payload;
+    } catch {
+        return;
+    }
+    const diskPath = data && data.path;
+    const newContent = data && data.content;
+    if (!diskPath || typeof newContent !== 'string') return;
+
+    docTabs.forEach((tab) => {
+        if (tab.path && pathsEqual(tab.path, diskPath)) {
+            tab.value = newContent;
+        }
+    });
+
+    const active = getActiveDocTab();
+    if (active && active.path && pathsEqual(active.path, diskPath)) {
+        closeFindPanel();
+        editor.value = newContent;
+        content = newContent;
+        updateLineNumbers();
+        wordCountEl.textContent = `${countWords(newContent)} words`;
+        speakBtn.disabled = !newContent.trim();
+        if (viewerContent.classList.contains('active')) {
+            renderMarkdown(newContent);
+        }
+        SetActiveDocument(active.path, newContent);
+    }
+});
+
+(async function initFromStartupOrWelcome() {
+    try {
+        const path = await GetCurrentFile();
+        const fileContent = await GetContent();
+        if (path) {
+            docTabs = [];
+            docTabIdSeq = 0;
+            activeDocTabId = null;
+            openOrFocusDocument(path, fileContent);
+            return;
+        }
+    } catch (err) {
+        console.error('Startup file load:', err);
+    }
+    if (docTabs.length === 0) {
+        ensureDefaultUntitledTab();
+    }
+    viewer.innerHTML = `
     <div class="no-file">
         <div class="no-file-icon">📄</div>
         <div class="no-file-text">Welcome to MDViewer</div>
         <div class="no-file-hint">Click "Open" to load a markdown file</div>
     </div>
 `;
+})();

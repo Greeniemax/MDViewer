@@ -30,6 +30,14 @@ export function SaveFile(arg1, arg2) {
   return window['go']['main']['App']['SaveFile'](arg1, arg2);
 }
 
+export function SetActiveDocument(arg1, arg2) {
+  return window['go']['main']['App']['SetActiveDocument'](arg1, arg2);
+}
+
+export function SetWatchedFilePaths(arg1) {
+  return window['go']['main']['App']['SetWatchedFilePaths'](arg1);
+}
+
 export function SaveFileDialog(arg1) {
   return window['go']['main']['App']['SaveFileDialog'](arg1);
 }
