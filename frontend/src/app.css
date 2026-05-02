@@ -316,6 +316,7 @@ body {
     min-width: 0;
     min-height: 0;
     overflow: hidden;
+    position: relative;
 }
 
 .editor-container {
@@ -354,15 +355,35 @@ body {
     outline: none;
     overflow-y: auto;
     white-space: pre;
+    user-select: text;
+    forced-color-adjust: none;
 }
 
 .editor::placeholder {
     color: #5C5C5C;
 }
 
+/* Yellow selection for find / manual selection (Chromium/WebView2) */
 .editor::selection {
-    background-color: #ffeb3b;
-    color: #1e1e1e;
+    background-color: #ffeb3b !important;
+    color: #1e1e1e !important;
+}
+
+/* Brief pulse so a match is obvious even if native selection chrome is subtle */
+@keyframes editor-find-pulse {
+    0% {
+        box-shadow: inset 0 0 0 1px rgba(255, 235, 59, 0.95);
+    }
+    40% {
+        box-shadow: inset 0 0 0 2px rgba(255, 235, 59, 0.75);
+    }
+    100% {
+        box-shadow: inset 0 0 0 0 transparent;
+    }
+}
+
+textarea.editor.editor-find-flash {
+    animation: editor-find-pulse 0.85s ease-out 1;
 }
 
 /* Find dialog */
@@ -443,23 +464,29 @@ body {
     justify-content: flex-end;
 }
 
-/* Find results side panel */
+/* Find results side panel (absolute so WebView2 flex+width:0 does not hide it) */
 .find-results-panel {
-    width: 0;
-    min-width: 0;
-    overflow: hidden;
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(300px, 100%);
     display: flex;
     flex-direction: column;
     background: #252526;
-    border-left: 1px solid transparent;
-    transition: width 0.22s ease, min-width 0.22s ease, border-color 0.22s ease;
-    flex-shrink: 0;
+    border-left: 1px solid #3C3C3C;
+    box-shadow: -6px 0 20px rgba(0, 0, 0, 0.35);
+    z-index: 100;
+    transform: translateX(100%);
+    transition: transform 0.22s ease, visibility 0.22s ease;
+    visibility: hidden;
+    pointer-events: none;
 }
 
 .find-results-panel.open {
-    width: 300px;
-    min-width: 300px;
-    border-left-color: #3C3C3C;
+    transform: translateX(0);
+    visibility: visible;
+    pointer-events: auto;
 }
 
 .find-results-header {

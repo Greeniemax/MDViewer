@@ -15,11 +15,11 @@ export function ReadFile(arg1:string):Promise<string>;
 
 export function SaveFile(arg1:string,arg2:string):Promise<void>;
 
+export function SaveFileDialog(arg1:string):Promise<string>;
+
 export function SetActiveDocument(arg1:string,arg2:string):Promise<void>;
 
 export function SetWatchedFilePaths(arg1:Array<string>):Promise<void>;
-
-export function SaveFileDialog(arg1:string):Promise<string>;
 
 export function SpeakLine(arg1:string,arg2:string,arg3:number):Promise<void>;
 

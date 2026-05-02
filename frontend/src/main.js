@@ -995,8 +995,18 @@ function scrollEditorToIndex(index) {
     const padTop = parseFloat(style.paddingTop) || 0;
     const textBefore = editor.value.substring(0, index);
     const lineIndex = textBefore.split('\n').length - 1;
-    const targetTop = lineIndex * lineHeight + padTop - editor.clientHeight * 0.35;
-    editor.scrollTop = Math.max(0, targetTop);
+
+    const lineTop = lineIndex * lineHeight + padTop;
+    let targetScroll;
+    if (lineIndex === 0) {
+        targetScroll = 0;
+    } else {
+        const viewportMid = editor.clientHeight * 0.5;
+        targetScroll = lineTop - viewportMid + lineHeight * 0.5;
+    }
+
+    const maxScroll = Math.max(0, editor.scrollHeight - editor.clientHeight);
+    editor.scrollTop = Math.max(0, Math.min(maxScroll, targetScroll));
     lineNumbers.scrollTop = editor.scrollTop;
 }
 
@@ -1095,8 +1105,20 @@ function focusFindResult(index) {
     });
 
     editor.focus();
-    editor.setSelectionRange(m.start, m.end, 'forward');
     scrollEditorToIndex(m.start);
+
+    const applySelection = () => {
+        editor.setSelectionRange(m.start, m.end, 'forward');
+    };
+    applySelection();
+    requestAnimationFrame(() => {
+        applySelection();
+        requestAnimationFrame(() => {
+            applySelection();
+            editor.classList.add('editor-find-flash');
+            window.setTimeout(() => editor.classList.remove('editor-find-flash'), 900);
+        });
+    });
 }
 
 function runFind() {

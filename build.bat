@@ -1,44 +1,35 @@
 @echo off
-echo ========================================
-echo MDViewer - Building Application
-echo ========================================
-echo.
+setlocal EnableExtensions
+cd /d "%~dp0"
 
-REM Check if Wails is installed
-where wails >nul 2>nul
-if %ERRORLEVEL% NEQ 0 (
-    echo ERROR: Wails CLI is not installed or not in PATH
-    echo.
-    echo Please install Wails CLI first:
-    echo   go install github.com/wailsapp/wails/v2/cmd/wails@latest
-    echo.
-    pause
+if not exist "wails.json" (
+    echo [ERROR] Run this from the MDViewer project folder ^(wails.json not found^).
     exit /b 1
 )
 
-echo Building MDViewer for Windows...
-echo.
-
-wails build
-
-if %ERRORLEVEL% EQU 0 (
-    echo.
-    echo ========================================
-    echo Build completed successfully!
-    echo ========================================
-    echo.
-    echo Output: build\bin\MDViewer.exe
-    echo.
-    echo Run './run.bat' to launch the application
-    echo.
-) else (
-    echo.
-    echo ========================================
-    echo Build failed!
-    echo ========================================
-    echo.
-    echo Check the error messages above for details.
-    echo.
+where wails >nul 2>&1
+if errorlevel 1 (
+    echo [ERROR] Wails CLI is not on your PATH.
+    echo Install it, then open a new Command Prompt:
+    echo   go install github.com/wailsapp/wails/v2/cmd/wails@latest
+    echo Ensure Go's bin directory is on PATH ^(often %%USERPROFILE%%\go\bin^).
+    exit /b 1
 )
 
-pause
+where node >nul 2>&1
+if errorlevel 1 (
+    echo [ERROR] Node.js is not on your PATH. Wails needs it to build the frontend.
+    exit /b 1
+)
+
+echo Building MDViewer ^(frontend + bindings + Go embed^)...
+wails build
+if errorlevel 1 (
+    echo [ERROR] wails build failed.
+    exit /b 1
+)
+
+echo.
+echo OK:  %~dp0build\bin\MDViewer.exe
+endlocal
+exit /b 0
