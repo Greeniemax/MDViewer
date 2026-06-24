@@ -23,10 +23,10 @@ A modern, dual-pane markdown editor and viewer with native text-to-speech capabi
 - Click any word to select reading start position
 
 ### 🔊 Text-to-Speech (TTS)
-- Native TTS integration
-  - **macOS**: Uses the native `say` command
-  - **Windows**: Uses Windows Speech API (SAPI) via PowerShell
-- Multiple voice options
+- Natural neural voices via bundled **Piper** engine — offline, no API key required
+  - **macOS**: Piper neural TTS (primary); native `say` command as fallback
+  - **Windows**: Piper neural TTS (primary); Windows Speech API (SAPI) as fallback
+- Multiple voice options (two bundled Piper voices: Amy and Ryan)
 - Adjustable speech rate (100-250 words per minute)
 - Click-to-select reading position
 - Visual line highlighting during speech
@@ -36,11 +36,14 @@ A modern, dual-pane markdown editor and viewer with native text-to-speech capabi
 
 ### macOS
 - macOS 10.13 or later
-- Native macOS text-to-speech (pre-installed)
+- Bundled Piper neural TTS engine (included in the build; ~180 MB fetch at build time)
+- Native macOS `say` command (pre-installed, used as fallback)
+- **Distribution builds**: Apple Developer ID certificate for code-signing/notarizing the bundled `piper` binary (Gatekeeper blocks unsigned third-party binaries)
 
 ### Windows
 - Windows 10 or later
-- Windows Speech API (SAPI) - pre-installed with Windows
+- Bundled Piper neural TTS engine (included in the build; ~180 MB fetch at build time)
+- Windows Speech API (SAPI) — pre-installed with Windows (used as fallback)
 - PowerShell 5.0 or later (pre-installed with Windows 10+)
 
 ## Installation
@@ -65,8 +68,10 @@ A modern, dual-pane markdown editor and viewer with native text-to-speech capabi
    ```powershell
    git clone <repository-url>
    cd MDViewer
-   wails build
+   build.bat
    ```
+
+   > **Note:** The build scripts (`build.sh` / `build.bat`) automatically run `scripts/fetch-piper.sh` or `scripts/fetch-piper.ps1` on the first run to download the Piper binary and voice models (~180 MB). An internet connection is required for this one-time step.
 
 4. The built app will be in:
    - **macOS**: `build/bin/MDViewer.app`
@@ -144,9 +149,10 @@ Currently, all actions are toolbar-based. Future versions may include keyboard s
 - **Framework**: Wails v2.11.0
 - **Frontend**: Vanilla JavaScript, HTML5, CSS3
 - **Build Tool**: Vite
-- **TTS**: 
-  - macOS: Native `say` command
-  - Windows: Windows Speech API (SAPI) via PowerShell
+- **TTS**:
+  - Primary: Piper neural TTS engine (bundled, offline, no API key)
+  - Fallback — macOS: Native `say` command
+  - Fallback — Windows: Windows Speech API (SAPI) via PowerShell
 
 ## Project Structure
 
@@ -192,12 +198,17 @@ MDViewer/
 
 ### TTS Not Working
 
-**macOS:**
+**Piper (primary, both platforms):**
+- Ensure the build fetch step completed successfully (run `scripts/fetch-piper.sh` / `scripts\fetch-piper.ps1` manually if needed)
+- Verify that `piper/piper` (macOS) or `piper\piper.exe` (Windows) exists next to the application
+- On macOS, if you see a Gatekeeper security error, re-run `build.sh` to strip the quarantine attribute, or code-sign the binary
+
+**macOS (fallback):**
 - Ensure your Mac has text-to-speech enabled in System Preferences
 - Check that the `say` command works in Terminal: `say "Hello"`
 - Try selecting a different voice from the dropdown
 
-**Windows:**
+**Windows (fallback):**
 - Ensure PowerShell is available (pre-installed on Windows 10+)
 - Test SAPI in PowerShell:
   ```powershell
@@ -240,7 +251,9 @@ This is a personal/educational project. Feel free to fork and modify for your ne
 ## Credits
 
 - Built with [Wails](https://wails.io)
-- Uses native TTS on both macOS and Windows
+- Neural TTS powered by [Piper](https://github.com/rhasspy/piper) (open-source, offline)
+- Voice models from [rhasspy/piper-voices](https://huggingface.co/rhasspy/piper-voices) on Hugging Face
+- System voice fallback: macOS `say` command, Windows Speech API (SAPI)
 - Inspired by the need for accessible markdown reading tools
 
 ## Screenshot

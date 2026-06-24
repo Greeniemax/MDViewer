@@ -72,6 +72,14 @@ MDViewer/
   default voice for both Windows and macOS, keeping the native voices as a
   fallback tier. (OpenRouter was ruled out — it's a text-LLM gateway with no
   TTS.) Design doc: `Docs/superpowers/specs/2026-06-24-natural-tts-piper-design.md`.
+- **Natural TTS (Piper) — implemented.** Bundled the Piper neural TTS engine for
+  both Windows (`piper\piper.exe`) and macOS (`Contents/Resources/piper/piper`).
+  Default voices: `en_US-amy-medium` (female) and `en_US-ryan-medium` (male).
+  Rate slider (100–250 WPM) maps to Piper `--length_scale`. Synthesis uses
+  file-then-play (full WAV rendered before playback) to preserve complete word
+  endings. OS-native voices (SAPI/OneCore on Windows, `say` on macOS) kept as
+  automatic fallback. Line-by-line TTS architecture preserved unchanged.
+  Plan: `Docs/superpowers/plans/2026-06-24-natural-tts-piper.md`.
 
 ---
 *Last Updated: 2026-06-24*
