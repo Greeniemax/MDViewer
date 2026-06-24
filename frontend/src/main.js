@@ -1284,28 +1284,49 @@ contextMenu.addEventListener('click', async (e) => {
 async function loadVoices() {
     try {
         const voices = await GetAvailableVoices();
-        voiceSelect.innerHTML = '<option value="">Default Voice</option>';
+        voiceSelect.innerHTML = '';
+
+        const defaultOpt = document.createElement('option');
+        defaultOpt.value = '';
+        defaultOpt.textContent = 'Default Voice';
+        voiceSelect.appendChild(defaultOpt);
+
+        const naturalGroup = document.createElement('optgroup');
+        naturalGroup.label = 'Natural';
+        const systemGroup = document.createElement('optgroup');
+        systemGroup.label = 'System voices';
+
         voices.forEach(voice => {
             const option = document.createElement('option');
-            // Windows: "engine\tvoiceId\tlabel" (sapi or onecore). macOS: "Name|Description".
             const tabParts = voice.split('\t');
-            if (tabParts.length >= 3 && (tabParts[0] === 'sapi' || tabParts[0] === 'onecore')) {
+            if (tabParts.length >= 3 && tabParts[0] === 'piper') {
+                option.value = 'piper\t' + tabParts[1];
+                option.textContent = tabParts[2];
+                naturalGroup.appendChild(option);
+            } else if (tabParts.length >= 3 && (tabParts[0] === 'sapi' || tabParts[0] === 'onecore')) {
                 option.value = tabParts[0] + '\t' + tabParts[1];
                 option.textContent = tabParts[2];
+                systemGroup.appendChild(option);
             } else {
                 const sepIndex = voice.indexOf('|');
                 if (sepIndex > 0) {
-                    const name = voice.substring(0, sepIndex);
-                    const desc = voice.substring(sepIndex + 1);
-                    option.value = name;
-                    option.textContent = name + ' — ' + desc;
+                    option.value = voice.substring(0, sepIndex);
+                    option.textContent = voice.substring(0, sepIndex) + ' — ' + voice.substring(sepIndex + 1);
                 } else {
                     option.value = voice;
                     option.textContent = voice;
                 }
+                systemGroup.appendChild(option);
             }
-            voiceSelect.appendChild(option);
         });
+
+        if (naturalGroup.children.length > 0) voiceSelect.appendChild(naturalGroup);
+        if (systemGroup.children.length > 0) voiceSelect.appendChild(systemGroup);
+
+        // Prefer a natural (Piper) voice by default.
+        if (naturalGroup.children.length > 0) {
+            voiceSelect.value = naturalGroup.children[0].value;
+        }
     } catch (err) {
         console.error('Error loading voices:', err);
     }
