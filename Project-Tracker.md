@@ -86,6 +86,13 @@ MDViewer/
   esbuild/rollup binaries. `build.bat` now detects a non-Windows/missing
   `node_modules` and runs `npm install` (removing the foreign install first)
   before `npm run build`.
+- **Fix: "Open" loaded an empty document.** The Open-file handler set the path
+  but the editor stayed blank. Root cause: `openBtn` fetched content via a
+  separate `GetContent()` call (backend-state) that returned empty, while the
+  path came from `OpenFileDialog()`'s return — so the tab/status bar populated
+  but content didn't. Fixed by reading content directly with
+  `ReadFile(filePath)` (the same robust pattern the Recent-files path already
+  uses). Frontend-only change in `frontend/src/main.js`.
 
 ---
 *Last Updated: 2026-06-24*

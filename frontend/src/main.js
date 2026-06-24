@@ -387,7 +387,9 @@ openBtn.addEventListener('click', async () => {
             return;
         }
 
-        const fileContent = await GetContent();
+        // Read the content directly from the same call (robust), rather than a
+        // separate GetContent() that depends on backend state being in sync.
+        const fileContent = await ReadFile(filePath);
         openOrFocusDocument(filePath, fileContent);
     } catch (err) {
         console.error('Error opening file:', err);
