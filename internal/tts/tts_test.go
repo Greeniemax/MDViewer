@@ -1,6 +1,10 @@
 package tts
 
-import "testing"
+import (
+	"path/filepath"
+	"strings"
+	"testing"
+)
 
 func TestLengthScale(t *testing.T) {
 	cases := []struct {
@@ -33,5 +37,43 @@ func TestPiperVoiceID(t *testing.T) {
 	}
 	if _, ok := PiperVoiceID("Alex"); ok {
 		t.Errorf("bare macOS voice should not be a piper voice")
+	}
+}
+
+func TestBinaryName(t *testing.T) {
+	if BinaryName("windows") != "piper.exe" {
+		t.Errorf("windows binary name wrong")
+	}
+	if BinaryName("darwin") != "piper" {
+		t.Errorf("darwin binary name wrong")
+	}
+}
+
+func TestCandidateDirs(t *testing.T) {
+	win := CandidateDirs("C:/app", "windows")
+	if len(win) != 1 || win[0] != filepath.Join("C:/app", "piper") {
+		t.Errorf("windows candidates = %v", win)
+	}
+	mac := CandidateDirs("/A/Contents/MacOS", "darwin")
+	// expect both <exeDir>/piper and the .app Resources/piper sibling
+	wantRes := filepath.Join("/A/Contents", "Resources", "piper")
+	found := false
+	for _, d := range mac {
+		if d == wantRes {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("darwin candidates missing %q: got %v", wantRes, mac)
+	}
+}
+
+func TestVoiceLabel(t *testing.T) {
+	good := []byte(`{"dataset":"amy","language":{"code":"en_US"}}`)
+	if got := VoiceLabel(good, "en_US-amy-medium"); got != "Amy (Natural) — en_US" {
+		t.Errorf("VoiceLabel good = %q", got)
+	}
+	if got := VoiceLabel([]byte("not json"), "en_US-ryan-medium"); !strings.Contains(got, "Natural") {
+		t.Errorf("VoiceLabel fallback should contain 'Natural', got %q", got)
 	}
 }
