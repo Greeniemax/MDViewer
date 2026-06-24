@@ -39,6 +39,19 @@ if errorlevel 1 (
     exit /b 1
 )
 
+echo Bundling Piper TTS engine + voices...
+powershell -ExecutionPolicy Bypass -File "%~dp0scripts\fetch-piper.ps1"
+if errorlevel 1 (
+    echo [ERROR] Piper fetch failed.
+    exit /b 1
+)
+set "PIPER_OUT=%~dp0build\bin\piper"
+if not exist "%PIPER_OUT%\voices" mkdir "%PIPER_OUT%\voices"
+xcopy /E /I /Y "%~dp0resources\piper\engine\windows\piper" "%PIPER_OUT%" >nul
+copy /Y "%~dp0resources\piper\voices\*.onnx" "%PIPER_OUT%\voices\" >nul
+copy /Y "%~dp0resources\piper\voices\*.onnx.json" "%PIPER_OUT%\voices\" >nul
+echo Piper bundled at %PIPER_OUT%
+
 echo.
 echo OK:  %~dp0build\bin\MDViewer.exe
 endlocal

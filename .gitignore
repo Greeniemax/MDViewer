@@ -38,3 +38,7 @@ wails_*_temp.txt
 # Logs
 *.log
 
+# Piper TTS engine + voice models (fetched by scripts/fetch-piper.*)
+resources/piper/engine/
+resources/piper/voices/
+

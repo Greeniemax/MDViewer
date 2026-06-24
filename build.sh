@@ -26,6 +26,24 @@ wails build
 if [ $? -eq 0 ]; then
     echo ""
     echo "✅ Build successful!"
+
+    # --- Bundle Piper into the .app ---
+    echo "🔊 Bundling Piper TTS engine + voices..."
+    bash "$(dirname "$0")/scripts/fetch-piper.sh"
+
+    case "$(uname -m)" in
+      arm64|aarch64) PIPER_TARGET="darwin-arm64" ;;
+      *)             PIPER_TARGET="darwin-amd64" ;;
+    esac
+
+    APP_RES="build/bin/MDViewer.app/Contents/Resources/piper"
+    mkdir -p "$APP_RES/voices"
+    cp -R "resources/piper/engine/$PIPER_TARGET/piper/." "$APP_RES/"
+    cp resources/piper/voices/*.onnx resources/piper/voices/*.onnx.json "$APP_RES/voices/"
+    # Local dev: clear quarantine so Gatekeeper allows the bundled binary.
+    xattr -dr com.apple.quarantine "$APP_RES" 2>/dev/null || true
+    echo "   Piper bundled at $APP_RES"
+
     echo "📍 Application location: build/bin/MDViewer.app"
     echo ""
     echo "To run the app, use: ./run.sh"
