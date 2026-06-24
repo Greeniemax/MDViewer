@@ -11,7 +11,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
@@ -285,10 +284,7 @@ func wpmToOneCoreRate(rate int) float64 {
 
 func (a *App) runHiddenPowerShell(script string) error {
 	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", script)
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		HideWindow:    true,
-		CreationFlags: 0x08000000, // CREATE_NO_WINDOW
-	}
+	hideProcessWindow(cmd)
 
 	a.ttsMutex.Lock()
 	a.ttsProcess = cmd
@@ -492,10 +488,7 @@ func (a *App) getAvailableVoicesWindows() ([]string, error) {
 		"} catch {}\n" +
 		"$results | ForEach-Object { $_ }\n"
 	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", psScript)
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		HideWindow:    true,
-		CreationFlags: 0x08000000, // CREATE_NO_WINDOW
-	}
+	hideProcessWindow(cmd)
 
 	output, err := cmd.Output()
 	if err != nil {
