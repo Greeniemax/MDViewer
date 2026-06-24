@@ -432,10 +432,19 @@ func (a *App) IsSpeaking() bool {
 
 // GetAvailableVoices returns list of available TTS voices
 func (a *App) GetAvailableVoices() ([]string, error) {
+	piper := a.getPiperVoices()
+
+	var native []string
+	var err error
 	if runtimePkg.GOOS == "windows" {
-		return a.getAvailableVoicesWindows()
+		native, err = a.getAvailableVoicesWindows()
+	} else {
+		native, err = a.getAvailableVoicesMacOS()
 	}
-	return a.getAvailableVoicesMacOS()
+	if err != nil && len(piper) == 0 {
+		return nil, err
+	}
+	return append(piper, native...), nil
 }
 
 // getAvailableVoicesMacOS returns available voices on macOS

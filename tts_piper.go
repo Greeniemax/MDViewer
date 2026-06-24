@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	runtimePkg "runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -37,6 +38,33 @@ func (a *App) resolvePiper() (string, string, bool) {
 		}
 	}
 	return "", "", false
+}
+
+// getPiperVoices lists bundled Piper voices as "piper\t<modelKey>\t<label>".
+func (a *App) getPiperVoices() []string {
+	_, voicesDir, ok := a.resolvePiper()
+	if !ok {
+		return nil
+	}
+	entries, err := os.ReadDir(voicesDir)
+	if err != nil {
+		return nil
+	}
+	var voices []string
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasSuffix(name, ".onnx") {
+			continue
+		}
+		modelKey := strings.TrimSuffix(name, ".onnx")
+		label := modelKey + " (Natural)"
+		if data, err := os.ReadFile(filepath.Join(voicesDir, name+".json")); err == nil {
+			label = tts.VoiceLabel(data, modelKey)
+		}
+		voices = append(voices, "piper\t"+modelKey+"\t"+label)
+	}
+	sort.Strings(voices)
+	return voices
 }
 
 // speakLinePiper synthesizes one line to a complete WAV with Piper, then plays
