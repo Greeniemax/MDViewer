@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	runtimePkg "runtime"
+	"sort"
 	"strings"
 	"sync"
 	"syscall"
@@ -251,14 +252,64 @@ func (a *App) speakLineMacOS(text string, voice string, rate int) error {
 	return err
 }
 
-// speakLineWindows speaks a line using Windows SAPI
+// escapePowerShellSingleQuoted escapes text for use inside PowerShell single-quoted strings.
+func escapePowerShellSingleQuoted(text string) string {
+	text = strings.ReplaceAll(text, "'", "''")
+	return strings.ReplaceAll(text, "`", "``")
+}
+
+// parseWindowsVoice splits "engine\tid" voice selectors from the UI.
+// Legacy plain SAPI voice names are still accepted.
+func parseWindowsVoice(voice string) (engine, id string) {
+	if voice == "" || voice == "default" {
+		return "sapi", ""
+	}
+	parts := strings.SplitN(voice, "\t", 2)
+	if len(parts) == 2 && (parts[0] == "sapi" || parts[0] == "onecore") {
+		return parts[0], parts[1]
+	}
+	return "sapi", voice
+}
+
+// wpmToOneCoreRate maps the UI speech rate (100-250 WPM) to OneCore SpeakingRate (0.5-2.0).
+func wpmToOneCoreRate(rate int) float64 {
+	speakingRate := 0.65 + float64(rate-100)*0.9/150.0
+	if speakingRate < 0.5 {
+		return 0.5
+	}
+	if speakingRate > 2.0 {
+		return 2.0
+	}
+	return speakingRate
+}
+
+func (a *App) runHiddenPowerShell(script string) error {
+	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", script)
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		HideWindow:    true,
+		CreationFlags: 0x08000000, // CREATE_NO_WINDOW
+	}
+
+	a.ttsMutex.Lock()
+	a.ttsProcess = cmd
+	a.ttsMutex.Unlock()
+
+	return cmd.Run()
+}
+
+// speakLineWindows speaks a line using Windows SAPI or OneCore voices.
 func (a *App) speakLineWindows(text string, voice string, rate int) error {
-	// Escape text for PowerShell
-	escapedText := strings.ReplaceAll(text, "'", "''")
-	escapedText = strings.ReplaceAll(escapedText, "`", "``")
-	
-	// Convert rate (100-250 WPM) to SAPI rate (-10 to 10)
-	// 100 WPM -> -5, 175 WPM -> 0, 250 WPM -> 5
+	engine, voiceID := parseWindowsVoice(voice)
+	if engine == "onecore" {
+		return a.speakLineWindowsOneCore(text, voiceID, rate)
+	}
+	return a.speakLineWindowsSAPI(text, voiceID, rate)
+}
+
+// speakLineWindowsSAPI speaks using legacy SAPI desktop voices (System.Speech).
+func (a *App) speakLineWindowsSAPI(text, voiceID string, rate int) error {
+	escapedText := escapePowerShellSingleQuoted(text)
+
 	sapiRate := ((rate - 175) * 5) / 75
 	if sapiRate < -10 {
 		sapiRate = -10
@@ -267,22 +318,21 @@ func (a *App) speakLineWindows(text string, voice string, rate int) error {
 		sapiRate = 10
 	}
 
-	// Build PowerShell script
 	psScript := fmt.Sprintf(`
 Add-Type -AssemblyName System.Speech
 $synth = New-Object System.Speech.Synthesis.SpeechSynthesizer
 $synth.Rate = %d
 `, sapiRate)
 
-	// Add voice selection if specified
-	if voice != "" && voice != "default" {
+	if voiceID != "" {
+		escapedVoice := escapePowerShellSingleQuoted(voiceID)
 		psScript += fmt.Sprintf(`
 try {
     $synth.SelectVoice('%s')
 } catch {
     # If voice selection fails, use default
 }
-`, voice)
+`, escapedVoice)
 	}
 
 	psScript += fmt.Sprintf(`
@@ -290,20 +340,53 @@ $synth.Speak('%s')
 $synth.Dispose()
 `, escapedText)
 
-	// Execute PowerShell command with hidden window
-	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", psScript)
-	
-	// Hide the console window on Windows
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		HideWindow:    true,
-		CreationFlags: 0x08000000, // CREATE_NO_WINDOW
-	}
-	
-	a.ttsMutex.Lock()
-	a.ttsProcess = cmd
-	a.ttsMutex.Unlock()
+	return a.runHiddenPowerShell(psScript)
+}
 
-	return cmd.Run()
+// speakLineWindowsOneCore speaks using Windows OneCore voices (Settings > Speech / language packs).
+func (a *App) speakLineWindowsOneCore(text, voiceID string, rate int) error {
+	escapedText := escapePowerShellSingleQuoted(text)
+	speakingRate := wpmToOneCoreRate(rate)
+
+	psScript := fmt.Sprintf(`
+Add-Type -AssemblyName System.Runtime.WindowsRuntime
+[Windows.Foundation.IAsyncOperation`+"`"+`1, Windows.Foundation, ContentType=WindowsRuntime] | Out-Null
+[Windows.Media.SpeechSynthesis.SpeechSynthesizer, Windows.Media.SpeechSynthesis, ContentType=WindowsRuntime] | Out-Null
+[Windows.Media.SpeechSynthesis.SpeechSynthesisStream, Windows.Media.SpeechSynthesis, ContentType=WindowsRuntime] | Out-Null
+$_taskMethods = [System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {
+    $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1
+}
+$asTaskGeneric = ($_taskMethods | Where-Object { $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`+"`"+`1' })[0]
+Function Await($WinRtTask, $ResultType) {
+    $asTask = $asTaskGeneric.MakeGenericMethod($ResultType)
+    $netTask = $asTask.Invoke($null, @($WinRtTask))
+    $netTask.Wait(-1) | Out-Null
+    $netTask.Result
+}
+$synth = New-Object Windows.Media.SpeechSynthesis.SpeechSynthesizer
+$synth.Options.SpeakingRate = %g
+`, speakingRate)
+
+	if voiceID != "" {
+		escapedVoice := escapePowerShellSingleQuoted(voiceID)
+		psScript += fmt.Sprintf(`
+$selected = [Windows.Media.SpeechSynthesis.SpeechSynthesizer]::AllVoices | Where-Object { $_.Id -eq '%s' } | Select-Object -First 1
+if ($selected) { $synth.Voice = $selected }
+`, escapedVoice)
+	}
+
+	psScript += fmt.Sprintf(`
+$winrtStream = Await ($synth.SynthesizeTextToStreamAsync('%s')) ([Windows.Media.SpeechSynthesis.SpeechSynthesisStream])
+$stream = [System.IO.WindowsRuntimeStreamExtensions]::AsStreamForRead($winrtStream)
+$player = New-Object System.Media.SoundPlayer $stream
+$player.PlaySync()
+$player.Dispose()
+$stream.Dispose()
+$winrtStream.Dispose()
+$synth.Dispose()
+`, escapedText)
+
+	return a.runHiddenPowerShell(psScript)
 }
 
 // Stop stops the current TTS
@@ -382,21 +465,33 @@ func (a *App) getAvailableVoicesMacOS() ([]string, error) {
 	return voices, nil
 }
 
-// getAvailableVoicesWindows returns available voices on Windows
+// getAvailableVoicesWindows returns SAPI desktop voices and OneCore voices installed via Windows Settings.
+// Each entry uses "engine\tvoiceId\tlabel" so the UI can show a friendly name and select the right engine.
 func (a *App) getAvailableVoicesWindows() ([]string, error) {
-	psScript := `
-Add-Type -AssemblyName System.Speech
-$synth = New-Object System.Speech.Synthesis.SpeechSynthesizer
-$synth.GetInstalledVoices() | ForEach-Object {
-    $name = $_.VoiceInfo.Name
-    $desc = $_.VoiceInfo.Description
-    if ($desc) { "$name|$desc" } else { $name }
-}
-$synth.Dispose()
-`
+	psScript := "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)\n" +
+		"$tab = [char]9\n" +
+		"$results = New-Object System.Collections.Generic.List[string]\n" +
+		"try {\n" +
+		"    Add-Type -AssemblyName System.Speech\n" +
+		"    $synth = New-Object System.Speech.Synthesis.SpeechSynthesizer\n" +
+		"    $synth.GetInstalledVoices() | ForEach-Object {\n" +
+		"        $info = $_.VoiceInfo\n" +
+		"        $label = if ($info.Description) { $info.Description } else { $info.Name }\n" +
+		"        $results.Add(('sapi' + $tab + $info.Name + $tab + $label))\n" +
+		"    }\n" +
+		"    $synth.Dispose()\n" +
+		"} catch {}\n" +
+		"try {\n" +
+		"    Add-Type -AssemblyName System.Runtime.WindowsRuntime\n" +
+		"    [Windows.Foundation.IAsyncOperation`1, Windows.Foundation, ContentType=WindowsRuntime] | Out-Null\n" +
+		"    [Windows.Media.SpeechSynthesis.SpeechSynthesizer, Windows.Media.SpeechSynthesis, ContentType=WindowsRuntime] | Out-Null\n" +
+		"    [Windows.Media.SpeechSynthesis.SpeechSynthesizer]::AllVoices | ForEach-Object {\n" +
+		"        $label = ('{0} - {1}' -f $_.DisplayName, $_.Language)\n" +
+		"        $results.Add(('onecore' + $tab + $_.Id + $tab + $label))\n" +
+		"    }\n" +
+		"} catch {}\n" +
+		"$results | ForEach-Object { $_ }\n"
 	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", psScript)
-
-	// Hide the console window on Windows
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		HideWindow:    true,
 		CreationFlags: 0x08000000, // CREATE_NO_WINDOW
@@ -408,13 +503,30 @@ $synth.Dispose()
 	}
 
 	voices := []string{}
+	seen := map[string]struct{}{}
 	lines := strings.Split(string(output), "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
-		if line != "" {
-			voices = append(voices, line)
+		if line == "" {
+			continue
 		}
+		if _, exists := seen[line]; exists {
+			continue
+		}
+		seen[line] = struct{}{}
+		voices = append(voices, line)
 	}
+	sort.Slice(voices, func(i, j int) bool {
+		labelI := voices[i]
+		labelJ := voices[j]
+		if parts := strings.SplitN(voices[i], "\t", 3); len(parts) == 3 {
+			labelI = parts[2]
+		}
+		if parts := strings.SplitN(voices[j], "\t", 3); len(parts) == 3 {
+			labelJ = parts[2]
+		}
+		return strings.ToLower(labelI) < strings.ToLower(labelJ)
+	})
 	return voices, nil
 }
 

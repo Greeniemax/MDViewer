@@ -1287,16 +1287,22 @@ async function loadVoices() {
         voiceSelect.innerHTML = '<option value="">Default Voice</option>';
         voices.forEach(voice => {
             const option = document.createElement('option');
-            // Backend may return "Name|Description" format
-            const sepIndex = voice.indexOf('|');
-            if (sepIndex > 0) {
-                const name = voice.substring(0, sepIndex);
-                const desc = voice.substring(sepIndex + 1);
-                option.value = name;
-                option.textContent = name + ' — ' + desc;
+            // Windows: "engine\tvoiceId\tlabel" (sapi or onecore). macOS: "Name|Description".
+            const tabParts = voice.split('\t');
+            if (tabParts.length >= 3 && (tabParts[0] === 'sapi' || tabParts[0] === 'onecore')) {
+                option.value = tabParts[0] + '\t' + tabParts[1];
+                option.textContent = tabParts[2];
             } else {
-                option.value = voice;
-                option.textContent = voice;
+                const sepIndex = voice.indexOf('|');
+                if (sepIndex > 0) {
+                    const name = voice.substring(0, sepIndex);
+                    const desc = voice.substring(sepIndex + 1);
+                    option.value = name;
+                    option.textContent = name + ' — ' + desc;
+                } else {
+                    option.value = voice;
+                    option.textContent = voice;
+                }
             }
             voiceSelect.appendChild(option);
         });

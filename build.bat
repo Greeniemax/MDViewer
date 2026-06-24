@@ -23,7 +23,17 @@ if errorlevel 1 (
 )
 
 echo Building MDViewer ^(frontend + bindings + Go embed^)...
-wails build
+pushd "%~dp0frontend"
+call npm.cmd run build
+if errorlevel 1 (
+    popd
+    echo [ERROR] Frontend build failed.
+    exit /b 1
+)
+popd
+
+REM Wails invokes npm.exe internally, which can fail on some Windows setups; frontend is already built.
+wails build -s
 if errorlevel 1 (
     echo [ERROR] wails build failed.
     exit /b 1
