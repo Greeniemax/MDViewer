@@ -30,9 +30,10 @@ type App struct {
 	ctx         context.Context
 	currentFile string
 	content     string
-	ttsProcess  *exec.Cmd
-	ttsMutex    sync.Mutex
-	isSpeaking  bool
+	ttsProcess     *exec.Cmd
+	ttsMutex       sync.Mutex
+	isSpeaking     bool
+	stopRequested  bool
 
 	watchMu      sync.Mutex
 	fileWatcher  *fsnotify.Watcher
@@ -197,17 +198,23 @@ func (a *App) SpeakLine(text string, voice string, rate int) error {
 	}
 
 	a.isSpeaking = true
+	a.stopRequested = false
 	a.ttsMutex.Unlock()
 
 	var err error
 	if id, ok := tts.PiperVoiceID(voice); ok {
 		err = a.speakLinePiper(text, id, rate)
 		if err != nil {
-			// Natural engine failed — fall back to the platform-native voice.
-			if runtimePkg.GOOS == "windows" {
-				err = a.speakLineWindows(text, "", rate)
-			} else {
-				err = a.speakLineMacOS(text, "", rate)
+			a.ttsMutex.Lock()
+			stopped := a.stopRequested
+			a.ttsMutex.Unlock()
+			if !stopped {
+				// Natural engine failed (not a user Stop) — fall back to the native voice.
+				if runtimePkg.GOOS == "windows" {
+					err = a.speakLineWindows(text, "", rate)
+				} else {
+					err = a.speakLineMacOS(text, "", rate)
+				}
 			}
 		}
 	} else if runtimePkg.GOOS == "windows" {
@@ -401,6 +408,7 @@ $synth.Dispose()
 func (a *App) Stop() error {
 	a.ttsMutex.Lock()
 	defer a.ttsMutex.Unlock()
+	a.stopRequested = true
 
 	if a.ttsProcess != nil {
 		if runtimePkg.GOOS == "windows" {
@@ -412,10 +420,13 @@ func (a *App) Stop() error {
 				a.ttsProcess.Process.Kill()
 			}
 		} else {
-			// Kill the say process on macOS
+			// Kill the tracked process (piper synth or its audio player) directly,
+			// then sweep the native players.
+			if a.ttsProcess.Process != nil {
+				a.ttsProcess.Process.Kill()
+			}
 			exec.Command("pkill", "-f", "say").Run()
 			exec.Command("pkill", "-f", "afplay").Run()
-			exec.Command("pkill", "-f", "piper").Run()
 		}
 		a.ttsProcess = nil
 		a.isSpeaking = false

@@ -66,7 +66,7 @@ At 175 WPM (the midpoint/natural pace) `length_scale` = 1.0. The clamp keeps the
 Piper synthesis is file-based:
 
 1. Piper renders the text to a temporary WAV file (typically ~10× faster than real-time on CPU).
-2. The WAV is played by the OS audio player (`afplay` on macOS, `mplayer`/`MediaPlayer` on Windows).
+2. The WAV is played by the OS audio player (`afplay` on macOS, `System.Media.SoundPlayer` on Windows).
 
 This approach guarantees complete word endings are rendered before playback begins, eliminating the tail-cutoff problem that affected the old streaming approach.
 

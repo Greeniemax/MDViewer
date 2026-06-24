@@ -29,7 +29,7 @@ if [ $? -eq 0 ]; then
 
     # --- Bundle Piper into the .app ---
     echo "🔊 Bundling Piper TTS engine + voices..."
-    bash "$(dirname "$0")/scripts/fetch-piper.sh"
+    bash "$(dirname "$0")/scripts/fetch-piper.sh" || { echo "❌ Piper fetch failed"; exit 1; }
 
     case "$(uname -m)" in
       arm64|aarch64) PIPER_TARGET="darwin-arm64" ;;
@@ -37,9 +37,9 @@ if [ $? -eq 0 ]; then
     esac
 
     APP_RES="build/bin/MDViewer.app/Contents/Resources/piper"
-    mkdir -p "$APP_RES/voices"
-    cp -R "resources/piper/engine/$PIPER_TARGET/piper/." "$APP_RES/"
-    cp resources/piper/voices/*.onnx resources/piper/voices/*.onnx.json "$APP_RES/voices/"
+    mkdir -p "$APP_RES/voices" || { echo "❌ Could not create Piper resources dir"; exit 1; }
+    cp -R "resources/piper/engine/$PIPER_TARGET/piper/." "$APP_RES/" || { echo "❌ Piper engine copy failed"; exit 1; }
+    cp resources/piper/voices/*.onnx resources/piper/voices/*.onnx.json "$APP_RES/voices/" || { echo "❌ Piper voices copy failed"; exit 1; }
     # Local dev: clear quarantine so Gatekeeper allows the bundled binary.
     xattr -dr com.apple.quarantine "$APP_RES" 2>/dev/null || true
     echo "   Piper bundled at $APP_RES"

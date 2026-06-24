@@ -8,18 +8,26 @@ $Rel    = "https://github.com/rhasspy/piper/releases/download/$PiperVersion"
 $Hf     = "https://huggingface.co/rhasspy/piper-voices/resolve/main"
 New-Item -ItemType Directory -Force -Path $Eng, $Voices | Out-Null
 
+function Get-FileWithRetry($uri, $out) {
+    for ($i = 1; $i -le 3; $i++) {
+        try { Invoke-WebRequest -Uri $uri -OutFile $out; return }
+        catch { if ($i -eq 3) { throw }; Start-Sleep -Seconds 2 }
+    }
+}
+
 function Fetch-Voice($key, $sub) {
-    $onnx = Join-Path $Voices "$key.onnx"
-    if (Test-Path $onnx) { Write-Host "voice $key present"; return }
-    Invoke-WebRequest -Uri "$Hf/$sub/$key.onnx?download=true"      -OutFile $onnx
-    Invoke-WebRequest -Uri "$Hf/$sub/$key.onnx.json?download=true" -OutFile (Join-Path $Voices "$key.onnx.json")
+    $onnx     = Join-Path $Voices "$key.onnx"
+    $onnxJson = Join-Path $Voices "$key.onnx.json"
+    if ((Test-Path $onnx) -and (Test-Path $onnxJson)) { Write-Host "voice $key present"; return }
+    Get-FileWithRetry "$Hf/$sub/$key.onnx?download=true"      $onnx
+    Get-FileWithRetry "$Hf/$sub/$key.onnx.json?download=true" $onnxJson
 }
 
 $winDir = Join-Path $Eng "windows"
 if (-not (Test-Path (Join-Path $winDir "piper\piper.exe"))) {
     New-Item -ItemType Directory -Force -Path $winDir | Out-Null
     $zip = Join-Path $env:TEMP "piper_win.zip"
-    Invoke-WebRequest -Uri "$Rel/piper_windows_amd64.zip" -OutFile $zip
+    Get-FileWithRetry "$Rel/piper_windows_amd64.zip" $zip
     Expand-Archive -Path $zip -DestinationPath $winDir -Force   # creates piper\ subdir
     Remove-Item $zip
 } else { Write-Host "engine windows present" }
