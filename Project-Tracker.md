@@ -63,5 +63,15 @@ MDViewer/
 4. Keyboard shortcuts
 5. macOS TTS optimization
 
+## Activity Log
+
+### 2026-06-24
+- **Natural TTS (Piper) — design approved.** The robotic voice is inherent to
+  the OS engines (Windows SAPI/OneCore, macOS `say`). Decided to bundle the
+  open-source **Piper** neural TTS engine (free, offline, no API key) as the new
+  default voice for both Windows and macOS, keeping the native voices as a
+  fallback tier. (OpenRouter was ruled out — it's a text-LLM gateway with no
+  TTS.) Design doc: `Docs/superpowers/specs/2026-06-24-natural-tts-piper-design.md`.
+
 ---
-*Last Updated: 2026-04-18*
+*Last Updated: 2026-06-24*
