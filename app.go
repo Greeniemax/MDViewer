@@ -13,6 +13,8 @@ import (
 	"sync"
 	"time"
 
+	"MDViewer/internal/tts"
+
 	"github.com/fsnotify/fsnotify"
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -198,7 +200,17 @@ func (a *App) SpeakLine(text string, voice string, rate int) error {
 	a.ttsMutex.Unlock()
 
 	var err error
-	if runtimePkg.GOOS == "windows" {
+	if id, ok := tts.PiperVoiceID(voice); ok {
+		err = a.speakLinePiper(text, id, rate)
+		if err != nil {
+			// Natural engine failed — fall back to the platform-native voice.
+			if runtimePkg.GOOS == "windows" {
+				err = a.speakLineWindows(text, "", rate)
+			} else {
+				err = a.speakLineMacOS(text, "", rate)
+			}
+		}
+	} else if runtimePkg.GOOS == "windows" {
 		err = a.speakLineWindows(text, voice, rate)
 	} else {
 		err = a.speakLineMacOS(text, voice, rate)
@@ -394,6 +406,7 @@ func (a *App) Stop() error {
 		if runtimePkg.GOOS == "windows" {
 			// Kill PowerShell processes running SAPI
 			exec.Command("taskkill", "/F", "/IM", "powershell.exe", "/FI", "WINDOWTITLE eq Windows PowerShell").Run()
+			exec.Command("taskkill", "/F", "/IM", "piper.exe").Run()
 			// Also try to kill by process tree
 			if a.ttsProcess.Process != nil {
 				a.ttsProcess.Process.Kill()
@@ -402,6 +415,7 @@ func (a *App) Stop() error {
 			// Kill the say process on macOS
 			exec.Command("pkill", "-f", "say").Run()
 			exec.Command("pkill", "-f", "afplay").Run()
+			exec.Command("pkill", "-f", "piper").Run()
 		}
 		a.ttsProcess = nil
 		a.isSpeaking = false
