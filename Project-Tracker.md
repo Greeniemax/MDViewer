@@ -80,6 +80,12 @@ MDViewer/
   endings. OS-native voices (SAPI/OneCore on Windows, `say` on macOS) kept as
   automatic fallback. Line-by-line TTS architecture preserved unchanged.
   Plan: `Docs/superpowers/plans/2026-06-24-natural-tts-piper.md`.
+- **build.bat — auto-install frontend deps.** Windows build failed with
+  "'vite' is not recognized" because `node_modules` had been installed under
+  WSL/Linux (same folder) and lacked the Windows `vite.cmd` shim + win32
+  esbuild/rollup binaries. `build.bat` now detects a non-Windows/missing
+  `node_modules` and runs `npm install` (removing the foreign install first)
+  before `npm run build`.
 
 ---
 *Last Updated: 2026-06-24*

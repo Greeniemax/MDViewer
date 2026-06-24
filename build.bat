@@ -24,10 +24,29 @@ if errorlevel 1 (
 
 echo Building MDViewer ^(frontend + bindings + Go embed^)...
 pushd "%~dp0frontend"
+
+REM node_modules may be absent (fresh clone) or installed for another OS
+REM (e.g. via WSL on this same folder), which lacks the Windows vite.cmd shim
+REM and the win32 esbuild/rollup binaries. Detect that and (re)install.
+if exist "node_modules" if not exist "node_modules\.bin\vite.cmd" (
+    echo Detected non-Windows node_modules; removing it for a clean Windows install...
+    rmdir /s /q node_modules
+)
+if not exist "node_modules\.bin\vite.cmd" (
+    echo Installing frontend dependencies...
+    call npm.cmd install
+    if errorlevel 1 (
+        popd
+        echo [ERROR] npm install failed.
+        exit /b 1
+    )
+)
+
 call npm.cmd run build
 if errorlevel 1 (
     popd
     echo [ERROR] Frontend build failed.
+    echo If this persists, delete frontend\node_modules and re-run this script.
     exit /b 1
 )
 popd
