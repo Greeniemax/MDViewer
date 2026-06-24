@@ -93,6 +93,14 @@ MDViewer/
   but content didn't. Fixed by reading content directly with
   `ReadFile(filePath)` (the same robust pattern the Recent-files path already
   uses). Frontend-only change in `frontend/src/main.js`.
+- **Fix: Open into the initial empty tab wiped the content.** Even after the
+  ReadFile fix, the first Open showed nothing (DEBUG proved content read =
+  55 KB but editor = 0). Root cause: `openOrFocusDocument` reuses the active
+  empty "Untitled" tab and sets `t.value = content`, then `switchToDocTab(t.id)`
+  calls `flushActiveTabEditor()` first — which copies the still-empty editor
+  back over `t.value`, erasing it. Fix: sync `editor.value = fileContent` before
+  the switch so the flush preserves it. (Recent-files dodged this by pushing a
+  new tab instead of reusing the active one.)
 
 ---
 *Last Updated: 2026-06-24*

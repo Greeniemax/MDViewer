@@ -234,6 +234,10 @@ function openOrFocusDocument(filePath, fileContent) {
         t.path = filePath;
         t.title = fileTitleFromPath(filePath);
         t.value = fileContent;
+        // This tab is still the active one, so switchToDocTab() will flush the
+        // editor back into it first. Sync the editor to the new content now, or
+        // that flush would overwrite t.value with the stale (empty) editor.
+        editor.value = fileContent;
         switchToDocTab(t.id);
         return;
     }
