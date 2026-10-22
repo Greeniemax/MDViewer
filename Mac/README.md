@@ -18,6 +18,10 @@ xcode-select --install
 ```
 
 No Xcode project is required; the app builds with Swift Package Manager.
+On a machine with only the Command Line Tools (no full Xcode), `build.sh`
+automatically picks an SDK whose SwiftUI still exposes `@State`/`@Binding` as
+property wrappers, because the macro plugin used by the newer SDKs ships only
+with Xcode.
 
 ## Quick start
 
@@ -34,11 +38,52 @@ cd Mac
 bash run.sh
 ```
 
-## Natural voices (Piper)
+## Install and make MDViewer the default Markdown app
 
-The macOS `say` voices work out of the box but sound robotic. To use the same
-offline neural voices as the Windows app, fetch the Piper engine and voice
-models once from the repository root:
+```bash
+cd Mac
+bash register.sh
+```
+
+`register.sh` builds, installs `/Applications/MDViewer.app`, registers it with
+Launch Services, and asks macOS to make it the handler for
+`net.daringfireball.markdown` (`.md` and `.markdown`). macOS 15+ refuses silent
+association changes from a shell script, so the app performs the request
+itself. You can repeat it at any time with **File → Set as Default Markdown
+App**.
+
+To undo, select another app in Finder: right-click a `.md` file → **Get Info**
+→ **Open with** → choose an app → **Change All…**.
+
+## Natural voices
+
+There are two ways to get natural-sounding speech on macOS.
+
+### 1. Apple's Enhanced / Premium voices (native, best option)
+
+macOS ships only compact voices by default, which is why Samantha and friends
+sound robotic. Apple offers free **Enhanced** and **Premium** voices
+(~100 MB–1 GB each) that you download once:
+
+1. System Settings → **Accessibility** → **Read & Speak**.
+2. Click **ⓘ** next to **System voice** → **Manage Voices…**.
+3. Open **English**, then download e.g. **Ava (Premium)**, **Zoe (Premium)**,
+   **Evan (Enhanced)** or **Samantha (Enhanced)**.
+4. In MDViewer press **Speech → Refresh Voices**.
+
+The app enumerates voices with `AVSpeechSynthesizer`, so downloaded voices are
+listed as `Ava (Premium) — en_US`, sorted above the compact ones, and picked
+automatically (a downloaded natural voice takes priority over everything else).
+The same pane is one click away via **Speech → Download Natural Voices…**.
+
+Siri voices are intentionally not exposed to third-party apps, and macOS has no
+supported way to download Enhanced/Premium voices from the command line.
+
+### 2. Bundled Piper voices (offline neural fallback)
+
+The app also bundles **Piper**, an offline neural engine with two English
+voices (Amy, Ryan). They are listed at the bottom of the picker and used as the
+fallback while no natural macOS voice is installed. To fetch/re-fetch them:
 
 ```bash
 bash scripts/fetch-piper.sh
@@ -53,8 +98,8 @@ bash build.sh
 
 `build.sh` detects Apple Silicon vs. Intel and bundles the matching Piper
 engine (`darwin-arm64` or `darwin-amd64`) plus the voices into
-`MDViewer.app/Contents/Resources/piper`. If the assets are missing the app still
-runs and automatically falls back to `say`.
+`MDViewer.app/Contents/Resources/piper`. If the assets are missing the app falls
+back to the system voices.
 
 You can also point the app at an existing Piper folder at runtime:
 
@@ -76,9 +121,15 @@ The folder must contain the `piper` executable and a `voices/` subdirectory.
   paragraphs.
 - **Instant Stop** — kills the active player and any in-flight synthesizer
   immediately, and discards queued audio files.
-- **Native voices** — macOS `say`/`afplay` (AIFF) and bundled Piper (WAV).
-- **Voice controls** — voice picker grouped into Natural and System voices,
-  with a 100–250 WPM rate slider mapped to Piper `length_scale`.
+- **Native voices** — macOS `AVSpeechSynthesizer`/`afplay` (WAV), including
+  downloaded Enhanced/Premium voices, plus bundled Piper (WAV).
+- **Voice controls** — the picker lists a short English-only set of the voices
+  actually installed on the Mac (via `AVSpeechSynthesizer`): Samantha, Daniel, Karen, Moira,
+  Tessa, Rishi and friends. Novelty voices and non-English locales are hidden.
+  The default is **Samantha**; the two bundled Piper voices (Amy, Ryan) are
+  kept at the bottom as a fallback. **Speech → Refresh Voices** re-scans the
+  system (e.g. after installing a voice in System Settings). The rate slider
+  (100–250 WPM) maps to Piper `length_scale`.
 - **Document tabs** — open several files, switch between them, and close them
   with a save prompt for unsaved changes.
 - **Recent files** — the ten most recent files, persisted across launches.
@@ -117,6 +168,7 @@ Mac/
 ├── Info.plist                 # app bundle metadata / markdown document types
 ├── build.sh                   # release build + .app packaging + ad-hoc sign
 ├── run.sh                     # build if needed, then open the app
+├── register.sh                # install to /Applications + default .md handler
 └── Sources/MDViewer/
     ├── MDViewerApp.swift      # @main app, app delegate, menu commands
     ├── AppModel.swift         # documents, tabs, find, voices, speech control
@@ -126,7 +178,7 @@ Mac/
     ├── ViewerView.swift       # SwiftUI markdown renderer
     ├── ContentView.swift      # window chrome, toolbar, find bar, status bar
     ├── SpeechEngine.swift     # prefetch + file-then-play TTS pipeline
-    ├── VoiceCatalog.swift     # Piper + `say -v ?` discovery and cache
+    ├── VoiceCatalog.swift     # Piper + AVSpeech voice discovery/quality + cache
     ├── PDFExport.swift        # markdown -> attributed string -> PDF
     ├── FileWatcher.swift      # polling external-change watcher
     └── Theme.swift            # colors and button styles
@@ -137,7 +189,7 @@ Mac/
 1. The document is split into cleaned, non-empty lines.
 2. The first line is synthesized to a temporary audio file.
 3. While line N plays with `afplay`, line N+1 is rendered by a concurrent
-   worker (Piper → WAV, `say` → AIFF).
+   worker (Piper → WAV, AVSpeechSynthesizer → WAV).
 4. When playback finishes, the prefetched file is already complete, so playback
    starts immediately.
 5. Stop increments the speech session, kills the player and any synthesizer,

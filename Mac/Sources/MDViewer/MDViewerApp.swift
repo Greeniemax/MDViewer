@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import Darwin
+import UniformTypeIdentifiers
 
 @main
 struct MDViewerApp: App {
@@ -26,6 +27,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         _ = NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
+
+        // `open -a MDViewer --args --set-default-markdown` asks macOS to make
+        // this app the default handler for Markdown files. macOS shows its own
+        // confirmation prompt; a plain CLI call cannot change the association.
+        if CommandLine.arguments.contains("--set-default-markdown") {
+            Self.requestDefaultMarkdownHandler()
+        }
+    }
+
+    static func requestDefaultMarkdownHandler() {
+        guard let markdown = UTType("net.daringfireball.markdown") else { return }
+        let app = Bundle.main.bundleURL
+        _ = try? NSWorkspace.shared.setDefaultApplication(at: app, toOpen: markdown)
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
@@ -76,6 +90,12 @@ struct AppCommands: Commands {
 
             Divider()
 
+            Button("Set as Default Markdown App") {
+                AppDelegate.requestDefaultMarkdownHandler()
+            }
+
+            Divider()
+
             Button("Close Tab") {
                 model.closeActiveTab()
             }
@@ -106,6 +126,20 @@ struct AppCommands: Commands {
             }
             .keyboardShortcut(".", modifiers: .command)
             .disabled(!model.isSpeaking)
+
+            Divider()
+
+            Button("Refresh Voices") {
+                model.refreshVoices()
+            }
+
+            Button("Download Natural Voices…") {
+                if let url = URL(
+                    string: "x-apple.systempreferences:com.apple.preference.universalaccess?SpokenContent"
+                ) {
+                    NSWorkspace.shared.open(url)
+                }
+            }
         }
 
         CommandMenu("Pane") {

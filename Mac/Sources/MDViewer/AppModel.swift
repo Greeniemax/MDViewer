@@ -21,7 +21,9 @@ final class AppModel: ObservableObject {
     // Voices
     @Published var voiceOptions: [VoiceOption] = []
     @Published var selectedVoiceID: String = "" {
-        didSet { UserDefaults.standard.set(selectedVoiceID, forKey: "selectedVoiceID") }
+        // v2: the old key could hold a bundled (Windows-shared) Piper voice;
+        // start fresh so the default is a native macOS voice.
+        didSet { UserDefaults.standard.set(selectedVoiceID, forKey: "selectedVoiceID.v3") }
     }
     @Published var rate: Double = 150 {
         didSet { UserDefaults.standard.set(rate, forKey: "speechRate") }
@@ -60,7 +62,7 @@ final class AppModel: ObservableObject {
         if let stored = defaults.object(forKey: "speechRate") as? Double {
             rate = stored
         }
-        selectedVoiceID = defaults.string(forKey: "selectedVoiceID") ?? ""
+        selectedVoiceID = defaults.string(forKey: "selectedVoiceID.v3") ?? ""
 
         ensureUntitledTab()
         scheduleVoiceLoad()
@@ -440,12 +442,19 @@ final class AppModel: ObservableObject {
         // Keep the launch path fast. Native voice enumeration waits until the
         // window has settled, and its result is cached for the next launch.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
-            DispatchQueue.global(qos: .utility).async {
-                let fresh = VoiceCatalog.refresh()
-                VoiceCatalog.saveCache(fresh)
-                DispatchQueue.main.async {
-                    self?.applyVoices(fresh)
-                }
+            self?.refreshVoices()
+        }
+    }
+
+    /// Re-reads the voices installed on this Mac (`say -v ?`) plus the bundled
+    /// Piper models. Safe to call at any time (e.g. after installing a voice in
+    /// System Settings) and updates the picker in place.
+    func refreshVoices() {
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let fresh = VoiceCatalog.refresh()
+            VoiceCatalog.saveCache(fresh)
+            DispatchQueue.main.async {
+                self?.applyVoices(fresh)
             }
         }
     }
@@ -459,11 +468,23 @@ final class AppModel: ObservableObject {
             if let preferred = VoiceCatalog.defaultVoice(from: voices) {
                 selectedVoiceID = preferred.id
             }
-        } else if previous != "system:",
-                  !voices.contains(where: { $0.id == previous }) {
+        } else if !voices.contains(where: { $0.id == previous }) {
             if let preferred = VoiceCatalog.defaultVoice(from: voices) {
                 selectedVoiceID = preferred.id
             }
+        }
+
+        // A downloaded natural macOS voice (Enhanced/Premium) always wins over
+        // the bundled or compact voices.
+        if let bestNative = voices
+            .filter({ $0.kind == .system && $0.quality >= 2 })
+            .max(by: { a, b in
+                if a.quality != b.quality { return a.quality < b.quality }
+                return a.label > b.label
+            }),
+           let current = voices.first(where: { $0.id == selectedVoiceID }),
+           current.quality < bestNative.quality {
+            selectedVoiceID = bestNative.id
         }
     }
 
@@ -480,7 +501,8 @@ final class AppModel: ObservableObject {
                 label: "Default Voice",
                 kind: .system,
                 systemName: nil,
-                piperModel: nil
+                piperModel: nil,
+                quality: 1
             )
         } else {
             voice = voiceOptions.first(where: { $0.id == selectedVoiceID })
@@ -490,7 +512,8 @@ final class AppModel: ObservableObject {
                     label: "Default Voice",
                     kind: .system,
                     systemName: nil,
-                    piperModel: nil
+                    piperModel: nil,
+                    quality: 1
                 )
         }
 

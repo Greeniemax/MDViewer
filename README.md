@@ -40,7 +40,8 @@ keyboard shortcuts.
 
 ### 🔊 Text-to-Speech (TTS)
 - Natural neural voices via bundled **Piper** engine — offline, no API key required
-  - **macOS**: Piper neural TTS (primary); native `say` command as fallback
+  - **macOS**: `AVSpeechSynthesizer` with downloaded Enhanced/Premium voices;
+    bundled Piper neural TTS as fallback
   - **Windows**: Piper neural TTS (primary); Windows Speech API (SAPI) as fallback
 - Multiple voice options (two bundled Piper voices: Amy and Ryan)
 - Adjustable speech rate (100-250 words per minute)
@@ -60,7 +61,7 @@ keyboard shortcuts.
 ### macOS
 - macOS 10.13 or later
 - Bundled Piper neural TTS engine (included in the build; ~180 MB fetch at build time)
-- Native macOS `say` command (pre-installed, used as fallback)
+- Native macOS speech synthesis (pre-installed; Enhanced/Premium voices downloadable)
 - **Distribution builds**: Apple Developer ID certificate for code-signing/notarizing the bundled `piper` binary (Gatekeeper blocks unsigned third-party binaries)
 
 ### Windows
@@ -175,7 +176,7 @@ Currently, all actions are toolbar-based. Future versions may include keyboard s
 - **Build Tool**: Vite
 - **TTS**:
   - Primary: Piper neural TTS engine (bundled, offline, no API key)
-  - Fallback — macOS: Native `say` command
+  - Fallback — macOS: Native `AVSpeechSynthesizer` voices
   - Fallback — Windows: Windows Speech API (SAPI) via PowerShell
 - **PDF export**: Edge or Chrome headless printing on Windows; native AppKit printing on macOS
 
@@ -231,7 +232,8 @@ MDViewer/
 
 **macOS (fallback):**
 - Ensure your Mac has text-to-speech enabled in System Preferences
-- Check that the `say` command works in Terminal: `say "Hello"`
+- Check that macOS speech works in Terminal: `say "Hello"` (or download
+  Enhanced/Premium voices in Accessibility → Read & Speak)
 - Try selecting a different voice from the dropdown
 
 **Windows (fallback):**
@@ -279,7 +281,7 @@ This is a personal/educational project. Feel free to fork and modify for your ne
 - Built with [Wails](https://wails.io)
 - Neural TTS powered by [Piper](https://github.com/rhasspy/piper) (open-source, offline)
 - Voice models from [rhasspy/piper-voices](https://huggingface.co/rhasspy/piper-voices) on Hugging Face
-- System voice fallback: macOS `say` command, Windows Speech API (SAPI)
+- System voice fallback: macOS `AVSpeechSynthesizer`, Windows Speech API (SAPI)
 - Inspired by the need for accessible markdown reading tools
 
 ## Screenshot

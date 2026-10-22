@@ -453,7 +453,10 @@ func saveNativeVoicesCache(voices []string) error {
 	return os.WriteFile(path, data, 0o644)
 }
 
-// getAvailableVoicesMacOS returns available voices on macOS
+// getAvailableVoicesMacOS returns the voices installed on this Mac (`say -v ?`).
+// The output format is "<display name>  <locale>  # <sample sentence>", where
+// the display name may contain spaces and parentheses ("Eddy (German (Germany))").
+// Only a short list of standard English voices is returned.
 func (a *App) getAvailableVoicesMacOS() ([]string, error) {
 	cmd := exec.Command("say", "-v", "?")
 	output, err := cmd.Output()
@@ -461,37 +464,92 @@ func (a *App) getAvailableVoicesMacOS() ([]string, error) {
 		return nil, err
 	}
 
-	voices := []string{}
-	lines := strings.Split(string(output), "\n")
-	for _, line := range lines {
+	type entry struct{ name, locale string }
+	var installed []entry
+	seen := map[string]struct{}{}
+	for _, line := range strings.Split(string(output), "\n") {
+		// Drop the "# ..." sample sentence first; it also contains spaces.
+		if i := strings.Index(line, "#"); i >= 0 {
+			line = line[:i]
+		}
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
-		parts := strings.Fields(line)
-		if len(parts) == 0 {
+
+		// The locale is the right-most whitespace-separated token.
+		cut := strings.LastIndexAny(line, " \t")
+		if cut <= 0 {
 			continue
 		}
-		voiceName := parts[0]
-		// Build description from remaining fields (typically: locale # sample)
-		desc := ""
-		if len(parts) > 1 {
-			// Skip the voice name, include the rest
-			desc = strings.Join(parts[1:], " ")
-			// Trim any leading "#" from sample text
-			desc = strings.TrimSpace(desc)
+		name := strings.TrimSpace(line[:cut])
+		locale := strings.TrimSpace(line[cut+1:])
+		if name == "" || !strings.HasPrefix(strings.ToLower(locale), "en") {
+			continue
 		}
-		if desc != "" {
-			voices = append(voices, voiceName+"|"+desc)
-		} else {
-			voices = append(voices, voiceName)
+		if _, exists := seen[name]; exists {
+			continue
 		}
+		seen[name] = struct{}{}
+		installed = append(installed, entry{name: name, locale: locale})
+	}
+
+	voices := []string{}
+	added := map[string]struct{}{}
+	add := func(e entry) {
+		if _, exists := added[e.name]; exists {
+			return
+		}
+		added[e.name] = struct{}{}
+		voices = append(voices, e.name+"|"+e.locale)
+	}
+
+	for _, name := range preferredEnglishVoiceNames {
+		for _, e := range installed {
+			if strings.EqualFold(e.name, name) {
+				add(e)
+				break
+			}
+		}
+	}
+	if len(voices) == 0 {
+		for _, e := range installed {
+			if strings.Contains(e.name, "(") || noveltyVoiceNames[e.name] {
+				continue
+			}
+			add(e)
+		}
+	}
+	if len(voices) > maxNativeVoices {
+		voices = voices[:maxNativeVoices]
 	}
 	return voices, nil
 }
 
+// Standard English voices in rough order of preference; only entries installed
+// on this machine are used.
+var preferredEnglishVoiceNames = []string{
+	"Samantha", "Alex", "Ava", "Allison", "Susan", "Tom", "Kathy",
+	"Daniel", "Serena", "Kate", "Oliver", "Arthur", "Martha",
+	"Karen", "Lee", "Matilda", "Moira", "Tessa",
+	"Rishi", "Aman", "Tara", "Veena",
+}
+
+// Joke/novelty voices that macOS also exposes.
+var noveltyVoiceNames = map[string]bool{
+	"Albert": true, "Bad News": true, "Bahh": true, "Bells": true,
+	"Boing": true, "Bubbles": true, "Cellos": true, "Fred": true,
+	"Good News": true, "Grandma": true, "Grandpa": true, "Jester": true,
+	"Junior": true, "Organ": true, "Ralph": true, "Rocko": true,
+	"Sandy": true, "Shelley": true, "Superstar": true, "Trinoids": true,
+	"Whisper": true, "Wobble": true, "Zarvox": true, "Eddy": true,
+	"Flo": true, "Reed": true,
+}
+
 // getAvailableVoicesWindows returns SAPI desktop voices and OneCore voices installed via Windows Settings.
 // Each entry uses "engine\tvoiceId\tlabel" so the UI can show a friendly name and select the right engine.
+// PowerShell is the primary enumerator; the registry fallback below guarantees
+// the installed voices are listed even when the WinRT/SAPI projections fail.
 func (a *App) getAvailableVoicesWindows() ([]string, error) {
 	psScript := "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)\n" +
 		"$tab = [char]9\n" +
@@ -520,24 +578,49 @@ func (a *App) getAvailableVoicesWindows() ([]string, error) {
 	hideProcessWindow(cmd)
 
 	output, err := cmd.Output()
-	if err != nil {
-		return nil, err
-	}
 
 	voices := []string{}
 	seen := map[string]struct{}{}
-	lines := strings.Split(string(output), "\n")
-	for _, line := range lines {
+	addVoice := func(line string) {
 		line = strings.TrimSpace(line)
 		if line == "" {
-			continue
+			return
 		}
-		if _, exists := seen[line]; exists {
-			continue
+		key := line
+		if parts := strings.SplitN(line, "\t", 3); len(parts) == 3 {
+			// PowerShell labels and registry labels can differ for the same
+			// voice, so de-duplicate on engine + id.
+			key = parts[0] + "\t" + parts[1]
 		}
-		seen[line] = struct{}{}
+		if _, exists := seen[key]; exists {
+			return
+		}
+		seen[key] = struct{}{}
 		voices = append(voices, line)
 	}
+
+	if err == nil {
+		for _, line := range strings.Split(string(output), "\n") {
+			addVoice(line)
+		}
+	}
+
+	// Installed voices straight from the registry (SAPI + OneCore, user + machine).
+	for _, line := range registryVoices() {
+		addVoice(line)
+	}
+
+	if len(voices) == 0 && err != nil {
+		return nil, err
+	}
+
+	// Keep the list short and English-only for normal use. If nothing matches
+	// (e.g. an unusual localized install), keep what we found instead of
+	// returning an empty picker.
+	if english := englishNativeVoices(voices); len(english) > 0 {
+		voices = english
+	}
+
 	sort.Slice(voices, func(i, j int) bool {
 		labelI := voices[i]
 		labelJ := voices[j]
@@ -549,7 +632,67 @@ func (a *App) getAvailableVoicesWindows() ([]string, error) {
 		}
 		return strings.ToLower(labelI) < strings.ToLower(labelJ)
 	})
+	if len(voices) > maxNativeVoices {
+		voices = voices[:maxNativeVoices]
+	}
 	return voices, nil
+}
+
+// maxNativeVoices caps the native list in the voice picker.
+const maxNativeVoices = 12
+
+// englishNativeVoices keeps English voices and collapses duplicates that
+// Windows exposes through both SAPI and OneCore (same display name).
+func englishNativeVoices(voices []string) []string {
+	out := make([]string, 0, len(voices))
+	seen := map[string]struct{}{}
+	for _, line := range voices {
+		parts := strings.SplitN(line, "\t", 3)
+		if len(parts) != 3 {
+			continue
+		}
+		if !isEnglishNativeVoice(parts[1], parts[2]) {
+			continue
+		}
+		key := voiceBaseName(parts[2])
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, line)
+	}
+	return out
+}
+
+func isEnglishNativeVoice(id, label string) bool {
+	id = strings.ToLower(id)
+	label = strings.ToLower(label)
+	if strings.Contains(label, "english") {
+		return true
+	}
+	for _, tag := range []string{
+		"en-us", "en_us", "enus", "en-gb", "en_gb", "engb",
+		"en-au", "en_au", "enau", "en-ca", "en_ca", "enca",
+		"en-ie", "en_ie", "enie", "en-in", "en_in", "enin",
+		"en-nz", "en_nz", "ennz", "en-za", "en_za", "enza",
+	} {
+		if strings.Contains(id, tag) {
+			return true
+		}
+	}
+	return false
+}
+
+// voiceBaseName is "Microsoft David Desktop - English (United States)" ->
+// "microsoft david", so SAPI and OneCore copies of one voice collapse.
+func voiceBaseName(label string) string {
+	base := label
+	if i := strings.Index(base, " - "); i > 0 {
+		base = base[:i]
+	}
+	base = strings.ReplaceAll(base, " Desktop", "")
+	base = strings.ReplaceAll(base, " Mobile", "")
+	return strings.ToLower(strings.TrimSpace(base))
 }
 
 func main() {

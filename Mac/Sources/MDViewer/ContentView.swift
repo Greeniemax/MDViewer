@@ -169,20 +169,19 @@ struct ContentView: View {
         let system = model.voiceOptions.filter { $0.kind == .system }
 
         Picker("Voice", selection: $model.selectedVoiceID) {
-            Text("Default Voice").tag("system:")
             if model.voiceOptions.isEmpty {
                 Text("Loading voices…").tag("")
             } else {
-                if !natural.isEmpty {
-                    Section("Natural") {
-                        ForEach(natural) { voice in
+                if !system.isEmpty {
+                    Section("macOS voices (\(system.count))") {
+                        ForEach(system) { voice in
                             Text(voice.label).tag(voice.id)
                         }
                     }
                 }
-                if !system.isEmpty {
-                    Section("System voices") {
-                        ForEach(system) { voice in
+                if !natural.isEmpty {
+                    Section("Bundled voices (\(natural.count))") {
+                        ForEach(natural) { voice in
                             Text(voice.label).tag(voice.id)
                         }
                     }
@@ -197,12 +196,16 @@ struct ContentView: View {
             Text("Rate")
                 .font(.system(size: 11))
                 .foregroundColor(Theme.dimText)
+                .lineLimit(1)
+                .fixedSize()
             Slider(value: $model.rate, in: 100...250, step: 1)
-                .frame(width: 90)
+                .frame(width: 80)
                 .tint(Theme.accent)
             Text("\(Int(model.rate))")
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundColor(Theme.text)
+                .lineLimit(1)
+                .fixedSize()
                 .frame(width: 28, alignment: .leading)
         }
 

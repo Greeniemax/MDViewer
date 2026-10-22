@@ -7,7 +7,7 @@
 - MD Editor — Raw markdown editing with syntax highlighting, line numbers, word count
 - MD Viewer — Real-time markdown rendering (headers, bold, italic, code, lists, blockquotes, tables, links)
 - Text-to-Speech — Native TTS:
-  - **macOS:** `say` command via temp AIFF files and `afplay`
+  - **macOS:** `AVSpeechSynthesizer` (WAV) + `afplay`; Enhanced/Premium voices supported
   - **Windows:** Windows Speech API (SAPI) via PowerShell
 - Click-to-Select — Click word in viewer to set reading position
 - Voice Controls — Multiple voices with adjustable rate (100-250 WPM)
@@ -21,7 +21,7 @@
 | Framework | Wails v2.11.0 |
 | Frontend | Vanilla JavaScript, HTML5, CSS3 |
 | Build Tool | Vite |
-| TTS Backend | macOS: `say`/`afplay`, Windows: SAPI via PowerShell |
+| TTS Backend | macOS: AVSpeechSynthesizer/`afplay`, Windows: SAPI/OneCore via PowerShell |
 | Native macOS app | Swift 5.9, SwiftUI + AppKit, Swift Package Manager |
 | PDF export | Windows: Edge/Chrome headless `--print-to-pdf`; macOS: AppKit `NSPrintOperation` |
 
@@ -52,6 +52,7 @@ MDViewer/
 │   ├── Sources/MDViewer/     # app, editor, viewer, markdown parser, TTS engine
 │   ├── Sources/MDViewer/PDFExport.swift  # markdown -> attributed string -> PDF
 │   ├── build.sh              # builds MDViewer.app, bundles Piper, ad-hoc signs
+│   ├── register.sh           # installs to /Applications, default .md handler
 │   └── README.md             # macOS build/run instructions
 ├── build/                    # Build output
 └── README.md
@@ -72,7 +73,8 @@ MDViewer/
 3. Add themes
 4. Keyboard shortcuts
 5. macOS TTS optimization
-6. Verify the native Mac app build on macOS (or via the macOS CI workflow)
+6. ~~Verify the native Mac app build on macOS~~ — verified: builds and runs on
+   macOS 26.6 with Command Line Tools only
 
 ## Activity Log
 
@@ -167,6 +169,100 @@ MDViewer/
   invokes the discovered Edge/Chrome headless binary, writes a PDF, and checks
   the `%PDF-` header; it passes on this machine via Chrome in ~5s. `wails build
   -s` rebuilt `build/bin/MDViewer.exe` with the final pipeline.
+- **Native Mac app built and run on a real Mac (macOS 26.6).** First local
+  build exposed environment issues rather than code issues:
+  - **CLT-only SwiftUI macros.** With only the Command Line Tools installed,
+    the macOS 27 SDK declares `@State`/`@Binding`/`@ObservedObject` as macros
+    whose `SwiftUIMacros` plugin ships *with Xcode only*, so compilation failed
+    with "external macro implementation type ... could not be found".
+    `Mac/build.sh` now detects the missing plugin and builds against the newest
+    installed SDK that still exposes SwiftUI property wrappers as structs
+    (26.5 here), so `xcode-select --install` remains sufficient.
+  - **Bundled Piper could not start in the app.** The release `piper` binary
+    links `@rpath/libespeak-ng`/`libonnxruntime` but carries no `LC_RPATH`.
+    `build.sh` now adds `@executable_path` with `install_name_tool`, so the
+    dylibs next to the binary resolve inside the bundle (verified: Piper renders
+    a valid WAV, RTF ~0.09).
+  - **Piper fetch copied debug dSYM stubs over the real dylibs.**
+    `scripts/fetch-piper.sh` copied every `*.dylib` found under the
+    piper-phonemize tarball, including the DWARF companion named
+    `libonnxruntime.1.14.1.dylib`; dyld then rejected it as "unloadable mach-o
+    file type 10". The find now prunes `*.dSYM` bundles.
+  - **Default Markdown app.** Set `LSHandlerRank` to `Owner`, dropped `.txt`
+    and `public.plain-text` so MDViewer no longer claims plain-text files, and
+    added `Mac/register.sh` (build → install `/Applications/MDViewer.app` →
+    `lsregister` → request the association). macOS 15+ ignores
+    `LSSetDefaultRoleHandlerForContentType` from a shell tool, so the app
+    handles `--set-default-markdown` via
+    `NSWorkspace.setDefaultApplication(at:toOpen:)`; **File → Set as Default
+    Markdown App** exposes the same request. Verified with
+    `NSWorkspace.urlForApplication(toOpen:)`: `net.daringfireball.markdown`
+    now resolves to `com.mdviewer.mac`, and double-clicking a `.md` file opens
+    it in MDViewer.
+- **Voice list now really reflects the machine (and is short).** The Mac
+  picker showed a handful of names, which looked like a hardcoded list:
+  - **Parser bug fixed.** `say -v ?` lines like
+    `Eddy (German (Germany)) de_DE  # ...` were skipped because the old regex
+    required two spaces before the locale, and the fallback split on the first
+    space. Only 83 of 184 installed voices survived (and labels were wrong).
+    The parser now strips the `#` sample and takes the right-most token as the
+    locale: all 184 voices parse. The Wails macOS path had the same bug and was
+    fixed (`Name|locale`).
+  - **English-only shortlist.** The native list is now filtered to English and
+    narrowed to the standard, useful voices actually installed
+    (`preferredEnglishNames`); novelty voices (Zarvox, Bells, Bad News...) and
+    the multi-language variants are hidden. Currently: Samantha, Kathy,
+    Daniel, Karen, Moira, Tessa, Rishi, Aman, Tara.
+  - **Ordering.** Native macOS voices are listed first and selected by default
+    (Samantha, falling back to the first installed English voice); the two
+    bundled Piper voices (Amy, Ryan) sit at the bottom as a fallback. Sections
+    show their counts (“macOS voices (9)”, “Bundled voices (2)”). The stored
+    voice key was bumped to `selectedVoiceID.v2` so the previous bundled-voice
+    selection does not stick.
+  - **Windows.** The PowerShell scan now also merges a
+    `golang.org/x/sys/windows/registry` fallback (SAPI 64/32-bit + OneCore,
+    HKLM + HKCU), so the list still contains the machine's installed voices if
+    the WinRT/SAPI projection fails. It is filtered to English, de-duplicated
+    across SAPI/OneCore, capped at 12, listed before the bundled voices, and the
+    first native voice is selected by default.
+  - **On-demand refresh.** Added **Speech → Refresh Voices** on macOS; the
+    cached list is still refreshed automatically 800 ms after launch. Verified
+    the dropdown shows only macOS voices with Samantha selected and Amy/Ryan at
+    the bottom. (Native rendering later moved to AVSpeechSynthesizer.)
+- **Research: how to get natural speech on macOS.** Investigated the options
+  beyond the `say` CLI:
+  - Apple ships only **compact** voices by default; every voice installed here
+    reports `AVSpeechSynthesisVoiceQuality.default` (180/180). The natural ones
+    are free **Enhanced** (~100 MB) / **Premium** (~1 GB) downloads in System
+    Settings → Accessibility → Read & Speak → ⓘ System voice → Manage Voices.
+    There is no supported CLI/automation to download them, and Siri voices are
+    not exposed to third-party apps.
+  - The modern API that sees those voices (and their quality tier) is
+    **AVSpeechSynthesizer**; `say -v ?` only exposes names and can lag behind.
+    `say` and AVSpeech both resolve the same voice identifiers, but AVSpeech is
+    the supported path for Enhanced/Premium.
+  - Offline neural alternatives researched: Piper (already bundled), Kokoro-82M
+    (Apache-2.0, ~82M params, very good and fast on Apple Silicon, but needs a
+    Python/MLX/CoreML runtime and a ~300 MB model), XTTS/F5/Chatterbox (heavier,
+    Python). Kokoro is the best future upgrade; not bundled yet.
+- **Native rendering switched to AVSpeechSynthesizer.** `SpeechEngine` now
+  synthesizes system voices with `AVSpeechSynthesizer.write(_:toBufferCallback:)`,
+  assembles the PCM buffers into a WAV via `AVAudioFile`, and plays it with
+  `afplay` — same prefetch/stop pipeline as Piper. The voice identifier from
+  `AVSpeechSynthesisVoice` is passed through, so a downloaded `Ava (Premium)`
+  is used exactly, not a same-named compact fallback. Stop calls
+  `stopSpeaking(at: .immediate)` on inline and prefetched synthesizers (verified:
+  cancellation returns in ~0.6 s and playback dies instantly). Rate 100–250 WPM
+  maps to `AVSpeechUtterance.rate` 0.3–0.9.
+- **Natural-voice discovery.** `VoiceCatalog` now enumerates
+  `AVSpeechSynthesisVoice.speechVoices()`, labels the tier
+  (`Ava (Premium) — en_US`), sorts Enhanced/Premium above compact voices,
+  auto-selects the best native voice when one is downloaded, and exposes
+  **Speech → Download Natural Voices…** (opens the Read & Speak pane).
+  The bundled Amy/Ryan remain at the bottom as fallback; the current default is
+  Amy until a natural macOS voice is installed, then the app upgrades itself.
+  Verified the AVSpeech path end-to-end: WAV rendered, `afplay` played it, stop
+  was immediate.
 
 ### 2026-06-24
 - **Natural TTS (Piper) — design approved.** The robotic voice is inherent to

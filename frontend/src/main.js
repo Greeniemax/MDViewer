@@ -1447,15 +1447,10 @@ function populateVoices(voices) {
     const previousValue = voiceSelect.value;
     voiceSelect.innerHTML = '';
 
-    const defaultOpt = document.createElement('option');
-    defaultOpt.value = '';
-    defaultOpt.textContent = 'Default Voice';
-    voiceSelect.appendChild(defaultOpt);
-
     const naturalGroup = document.createElement('optgroup');
-    naturalGroup.label = 'Natural';
+    naturalGroup.label = 'Bundled voices';
     const systemGroup = document.createElement('optgroup');
-    systemGroup.label = 'System voices';
+    systemGroup.label = 'Native voices';
 
     voices.forEach(voice => {
         const option = document.createElement('option');
@@ -1481,11 +1476,17 @@ function populateVoices(voices) {
         }
     });
 
-    if (naturalGroup.children.length > 0) voiceSelect.appendChild(naturalGroup);
-    if (systemGroup.children.length > 0) voiceSelect.appendChild(systemGroup);
+    if (systemGroup.children.length > 0) {
+        systemGroup.label = 'Native voices (' + systemGroup.children.length + ')';
+        voiceSelect.appendChild(systemGroup);
+    }
+    if (naturalGroup.children.length > 0) {
+        naturalGroup.label = 'Bundled voices (' + naturalGroup.children.length + ')';
+        voiceSelect.appendChild(naturalGroup);
+    }
 
     // Keep the user's selection when the background refresh arrives; otherwise
-    // prefer a natural (Piper) voice by default.
+    // prefer an installed system voice (the bundled voices are the fallback).
     if (previousValue) {
         const stillAvailable = Array.from(voiceSelect.options).some(opt => opt.value === previousValue);
         if (stillAvailable) {
@@ -1493,8 +1494,12 @@ function populateVoices(voices) {
             return;
         }
     }
-    if (naturalGroup.children.length > 0) {
-        voiceSelect.value = naturalGroup.children[0].value;
+    const firstNative = systemGroup.querySelector('option');
+    const firstBundled = naturalGroup.querySelector('option');
+    if (firstNative) {
+        voiceSelect.value = firstNative.value;
+    } else if (firstBundled) {
+        voiceSelect.value = firstBundled.value;
     }
 }
 

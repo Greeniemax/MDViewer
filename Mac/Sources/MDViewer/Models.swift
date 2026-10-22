@@ -31,6 +31,8 @@ struct VoiceOption: Identifiable, Hashable, Codable {
     let kind: Kind
     let systemName: String?
     let piperModel: String?
+    /// 0 = bundled Piper, 1 = compact system voice, 2 = enhanced, 3 = premium.
+    let quality: Int
 }
 
 struct SpeechJob {

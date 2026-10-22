@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 import Darwin
 
@@ -13,15 +14,16 @@ final class PrefetchEntry {
     var path: String?
     var error: Error?
     var process: Process?
+    var synthesizer: AVSpeechSynthesizer?
 }
 
 /// File-then-play speech pipeline.
 ///
-/// Every engine renders a complete audio file first (Piper -> WAV,
-/// macOS `say` -> AIFF), then `afplay` plays it. That makes it possible to
-/// render line N+1 while line N is still playing, so paragraphs flow without
-/// synthesis gaps. Stop kills both the player and any in-flight synthesizer
-/// immediately and discards the queued files.
+/// Every engine renders a complete audio file first (Piper -> WAV, macOS
+/// AVSpeechSynthesizer -> WAV), then `afplay` plays it. That makes it possible
+/// to render line N+1 while line N is still playing, so paragraphs flow
+/// without synthesis gaps. Stop kills the player, any in-flight Piper process
+/// and any active speech synthesizer immediately, then discards queued files.
 final class SpeechEngine {
     private let lock = NSLock()
     private var session = 0
@@ -29,6 +31,7 @@ final class SpeechEngine {
     private var prefetched: [String: PrefetchEntry] = [:]
     private var player: Process?
     private var inlineSynth: Process?
+    private var inlineSynthesizer: AVSpeechSynthesizer?
 
     private let work = DispatchQueue(label: "com.mdviewer.speech.work")
     private let render = DispatchQueue(
@@ -130,20 +133,25 @@ final class SpeechEngine {
         player = nil
         let activeSynth = inlineSynth
         inlineSynth = nil
+        let activeSynthesizer = inlineSynthesizer
+        inlineSynthesizer = nil
         let entries = Array(prefetched.values)
         prefetched.removeAll()
         lock.unlock()
 
         if let activePlayer { terminate(activePlayer) }
         if let activeSynth { terminate(activeSynth) }
+        if let activeSynthesizer { activeSynthesizer.stopSpeaking(at: .immediate) }
 
         for entry in entries {
             lock.lock()
             let process = entry.process
             let path = entry.path
+            let synthesizer = entry.synthesizer
             lock.unlock()
 
             if let process { terminate(process) }
+            synthesizer?.stopSpeaking(at: .immediate)
             if let path {
                 try? FileManager.default.removeItem(atPath: path)
             }
@@ -421,39 +429,91 @@ final class SpeechEngine {
         inline: Bool
     ) -> (path: String?, error: Error?) {
         let fm = FileManager.default
-        let output = Self.tempFileURL(ext: "aiff")
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/say")
-
-        var arguments: [String] = []
-        if let systemName, !systemName.isEmpty {
-            arguments.append(contentsOf: ["-v", systemName])
-        }
-        arguments.append(contentsOf: [
-            "-r", String(max(60, min(400, rate))),
-            "-o", output.path,
-            "--file-format=AIFF",
-            text
-        ])
-        process.arguments = arguments
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-
-        do {
-            try process.run()
-        } catch {
-            return (nil, error)
+        let output = Self.tempFileURL(ext: "wav")
+        guard let voice = Self.systemVoice(identifier: systemName) else {
+            return (nil, SpeechError.engineMissing)
         }
 
-        register(process, entry: entry, inline: inline)
-        process.waitUntilExit()
-        unregister(process, entry: entry, inline: inline)
+        let stateLock = NSLock()
+        var file: AVAudioFile?
+        var finished = false
+        var writeFailed = false
 
-        if process.terminationStatus != 0 || !fm.fileExists(atPath: output.path) {
+        let synthesizer = AVSpeechSynthesizer()
+        registerSynth(synthesizer, entry: entry, inline: inline)
+
+        let utterance = AVSpeechUtterance(string: text)
+        utterance.voice = voice
+        utterance.rate = Self.avRate(rate)
+        utterance.preUtteranceDelay = 0
+        utterance.postUtteranceDelay = 0
+
+        // `write` streams PCM buffers; assemble them into a WAV file so the
+        // rest of the pipeline can prefetch and `afplay` it like any render.
+        synthesizer.write(utterance) { buffer in
+            guard let pcm = buffer as? AVAudioPCMBuffer else { return }
+            if pcm.frameLength == 0 {
+                stateLock.lock()
+                finished = true
+                stateLock.unlock()
+                return
+            }
+
+            stateLock.lock()
+            if file == nil {
+                file = try? AVAudioFile(forWriting: output, settings: pcm.format.settings)
+            }
+            do {
+                try file?.write(from: pcm)
+            } catch {
+                writeFailed = true
+                finished = true
+            }
+            stateLock.unlock()
+        }
+
+        // The callbacks are delivered on this thread's run loop, so keep it
+        // turning while the synthesizer works. Stop() breaks us out via
+        // stopRequested and `stopSpeaking`.
+        let deadline = Date().addingTimeInterval(120)
+        while !stoppedNow() && Date() < deadline {
+            stateLock.lock()
+            let done = finished
+            stateLock.unlock()
+            if done { break }
+            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.02))
+        }
+
+        unregisterSynth(synthesizer, entry: entry, inline: inline)
+        stateLock.lock()
+        file = nil
+        let ok = finished && !writeFailed
+        stateLock.unlock()
+
+        if stoppedNow() {
             try? fm.removeItem(at: output)
-            return (nil, stoppedNow() ? SpeechError.stopped : SpeechError.renderFailed)
+            return (nil, SpeechError.stopped)
+        }
+        if !ok || !fm.fileExists(atPath: output.path) {
+            try? fm.removeItem(at: output)
+            return (nil, SpeechError.renderFailed)
         }
         return (output.path, nil)
+    }
+
+    private static func systemVoice(identifier: String?) -> AVSpeechSynthesisVoice? {
+        if let identifier, !identifier.isEmpty,
+           let voice = AVSpeechSynthesisVoice(identifier: identifier) {
+            return voice
+        }
+        return AVSpeechSynthesisVoice(language: "en-US")
+    }
+
+    /// 100-250 WPM mapped onto AVSpeechUtterance's 0...1 rate scale.
+    private static func avRate(_ wpm: Int) -> Float {
+        let clamped = Double(max(80, min(300, wpm)))
+        let value = 0.5 + (clamped - 150.0) * 0.003
+        return Float(max(0.3, min(0.9, value)))
     }
 
     // MARK: - Child processes
@@ -471,6 +531,22 @@ final class SpeechEngine {
         lock.lock()
         if entry.process === process { entry.process = nil }
         if inline, inlineSynth === process { inlineSynth = nil }
+        lock.unlock()
+    }
+
+    private func registerSynth(_ synthesizer: AVSpeechSynthesizer, entry: PrefetchEntry, inline: Bool) {
+        lock.lock()
+        entry.synthesizer = synthesizer
+        if inline { inlineSynthesizer = synthesizer }
+        let cancelled = stopRequested
+        lock.unlock()
+        if cancelled { synthesizer.stopSpeaking(at: .immediate) }
+    }
+
+    private func unregisterSynth(_ synthesizer: AVSpeechSynthesizer, entry: PrefetchEntry, inline: Bool) {
+        lock.lock()
+        if entry.synthesizer === synthesizer { entry.synthesizer = nil }
+        if inline, inlineSynthesizer === synthesizer { inlineSynthesizer = nil }
         lock.unlock()
     }
 
@@ -506,9 +582,11 @@ final class SpeechEngine {
             lock.lock()
             let process = entry.process
             let path = entry.path
+            let synthesizer = entry.synthesizer
             lock.unlock()
 
             if let process { terminate(process) }
+            synthesizer?.stopSpeaking(at: .immediate)
             if let path {
                 try? FileManager.default.removeItem(atPath: path)
             }

@@ -53,7 +53,9 @@ fetch_macos_dylibs() { # target asset
   mkdir -p "$tmp/pp"
   tar -xzf "$tmp/pp.tgz" -C "$tmp/pp"
   # Copy every dylib next to the piper binary so @rpath/... resolves at launch.
-  find "$tmp/pp" -name '*.dylib' -exec cp -f {} "$dest/" \;
+  # Skip .dSYM bundles: their DWARF companions are named like the dylibs and
+  # would overwrite the real libraries with debug-only Mach-O files.
+  find "$tmp/pp" -name '*.dSYM' -prune -o -name '*.dylib' -exec cp -f {} "$dest/" \;
   rm -rf "$tmp"
 }
 
