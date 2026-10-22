@@ -1,0 +1,40 @@
+name: macOS build
+
+on:
+  push:
+    paths:
+      - "Mac/**"
+      - ".github/workflows/macos.yml"
+  pull_request:
+    paths:
+      - "Mac/**"
+      - ".github/workflows/macos.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+    defaults:
+      run:
+        working-directory: Mac
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show Swift version
+        run: swift --version
+
+      - name: Build release binary
+        run: swift build -c release
+
+      - name: Package MDViewer.app
+        run: bash build.sh
+
+      - name: Archive app bundle
+        run: tar -czf MDViewer-macOS.tar.gz -C build MDViewer.app
+
+      - name: Upload app bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: MDViewer-macOS
+          path: Mac/MDViewer-macOS.tar.gz
+          if-no-files-found: error

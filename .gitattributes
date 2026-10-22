@@ -1,0 +1,5 @@
+# Keep shell scripts and Swift/CI sources LF even on Windows checkouts.
+*.sh   text eol=lf
+*.swift text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf

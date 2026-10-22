@@ -20,6 +20,8 @@ frontend/.vite
 # macOS
 .DS_Store
 *.app
+Mac/build/
+.build/
 
 # IDE
 .vscode/*

@@ -2,6 +2,22 @@
 
 A modern, dual-pane markdown editor and viewer with native text-to-speech capabilities for macOS and Windows.
 
+## Native macOS app
+
+The `Mac/` folder contains a native Swift/SwiftUI build of MDViewer with the
+same file-then-play TTS pipeline: line N+1 is synthesized while line N plays,
+and Stop kills playback immediately. It builds with Swift Package Manager and
+does not require Wails or Go:
+
+```bash
+cd Mac
+bash build.sh
+open build/MDViewer.app
+```
+
+See [Mac/README.md](Mac/README.md) for build details, Piper voice setup, and
+keyboard shortcuts.
+
 ## Features
 
 ### 📝 MD Editor

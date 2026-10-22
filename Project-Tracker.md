@@ -21,11 +21,13 @@
 | Frontend | Vanilla JavaScript, HTML5, CSS3 |
 | Build Tool | Vite |
 | TTS Backend | macOS: `say`/`afplay`, Windows: SAPI via PowerShell |
+| Native macOS app | Swift 5.9, SwiftUI + AppKit, Swift Package Manager |
 
 ## Current State
 **Status:** Active development
 - Extensive `Docs/` folder with 20 documentation files
-- Recent activity (Feb 28 - Apr 18, 2026)
+- Recent activity (Feb 28 - Oct 22, 2026)
+- Native macOS Swift port added under `Mac/` (build/run on macOS only)
 - Known issues fixed: AUDIO_CUTOFF_FIX, DEADLOCK_FIX, HIDDEN_WINDOW_FIX, TTS_AND_TABLE_FIXES, LINE_BY_LINE_FIX, PKILL_BUG_FIX, WINDOWS_TTS_IMPLEMENTATION
 
 ## Project Structure
@@ -43,6 +45,10 @@ MDViewer/
 │   ├── dist/                 # Built frontend assets
 │   └── package.json
 ├── Docs/                     # 20 development documentation files
+├── Mac/                      # Native macOS Swift port (SwiftPM + AppKit/SwiftUI)
+│   ├── Sources/MDViewer/     # app, editor, viewer, markdown parser, TTS engine
+│   ├── build.sh              # builds MDViewer.app, bundles Piper, ad-hoc signs
+│   └── README.md             # macOS build/run instructions
 ├── build/                    # Build output
 └── README.md
 ```
@@ -62,6 +68,7 @@ MDViewer/
 3. Add themes
 4. Keyboard shortcuts
 5. macOS TTS optimization
+6. Verify the native Mac app build on macOS (or via the macOS CI workflow)
 
 ## Activity Log
 
@@ -92,6 +99,35 @@ MDViewer/
   player was active; Stop removed the player and synth processes within one
   poll (<1s). SAPI and OneCore file-render scripts each produced valid RIFF/WAV
   output.
+- **Native macOS port added (`Mac/`).** New Swift Package Manager executable
+  (SwiftUI + AppKit, macOS 13+) that mirrors the Windows app: tabbed document
+  editor with line-number gutter, live markdown viewer, recent files, find with
+  match-case/whole-word, drag-and-drop, polling file watcher, and voice/rate
+  controls. TTS uses the same file-then-play design: Piper renders WAV (or
+  `say` renders AIFF) to a temp file, `afplay` plays it, and a concurrent
+  render queue synthesizes line N+1 while line N plays. Stop increments the
+  speech session and SIGKILLs the player/synthesizer immediately, then clears
+  queued temp files. Voice enumeration is cached in
+  `~/Library/Caches/MDViewer/voices.json` and refreshed 800ms after launch so
+  startup stays fast.
+- **Mac packaging:** `Mac/build.sh` builds a release binary, wraps it in
+  `MDViewer.app`, bundles the arch-matched Piper engine
+  (`darwin-arm64`/`darwin-amd64`) plus voices, and ad-hoc signs the bundle.
+  Falls back to native `say` when Piper assets are absent.
+  `Mac/run.sh` builds on first run and opens the app. Build/run instructions
+  are in `Mac/README.md`.
+- **Not compiled on this machine:** the Windows development host has no Swift
+  toolchain, so the macOS target still needs a first build/run verification on
+  an actual Mac (Xcode Command Line Tools). The Swift sources were written
+  conservatively for Swift 5 mode to avoid strict-concurrency breakage around
+  `Process`/`DispatchQueue`.
+- **First-build verification path:** added
+  `.github/workflows/macos.yml` so a push touching `Mac/**` compiles the Swift
+  package on a macOS runner, packages `MDViewer.app`, and uploads a tarball.
+  Also hardened the Mac sources for first run: CRLF files are normalized on
+  open, the reused editor text view resets its undo stack/selection per tab,
+  the voice picker includes the "Default Voice" option, and `build.sh` now uses
+  an `ls` glob check instead of bash-4-only `compgen -G` (macOS ships bash 3.2).
 
 ### 2026-06-24
 - **Natural TTS (Piper) — design approved.** The robotic voice is inherent to
