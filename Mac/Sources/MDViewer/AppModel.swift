@@ -288,6 +288,49 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Converts the active document to a PDF in a separate file chosen by the
+    /// user. The markdown source is never modified.
+    func exportPDF() {
+        guard let index = activeTabIndex else { return }
+        let text = tabs[index].text
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+
+        let panel = NSSavePanel()
+        panel.canCreateDirectories = true
+        panel.title = "Convert to PDF"
+        panel.allowedContentTypes = [.pdf]
+        panel.nameFieldStringValue = pdfDefaultName(for: tabs[index])
+        if let existing = tabs[index].path {
+            panel.directoryURL = existing.deletingLastPathComponent()
+        }
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        do {
+            try PDFExporter.writePDF(markdown: text, to: url)
+
+            let alert = NSAlert()
+            alert.messageText = "PDF saved"
+            alert.informativeText = url.path
+            alert.addButton(withTitle: "Show in Finder")
+            alert.addButton(withTitle: "Done")
+            if alert.runModal() == .alertFirstButtonReturn {
+                NSWorkspace.shared.activateFileViewerSelecting([url])
+            }
+        } catch {
+            presentError("Could not convert to PDF.\n\(error.localizedDescription)")
+        }
+    }
+
+    private func pdfDefaultName(for tab: DocumentTab) -> String {
+        if let path = tab.path {
+            return path.deletingPathExtension().lastPathComponent + ".pdf"
+        }
+        let title = tab.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let base = title.isEmpty || title == "Untitled" ? "untitled" : title
+        return base + ".pdf"
+    }
+
     private func readText(at url: URL) -> String? {
         let text: String
         if let utf8 = try? String(contentsOf: url, encoding: .utf8) {

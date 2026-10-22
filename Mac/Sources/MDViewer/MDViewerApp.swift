@@ -68,6 +68,12 @@ struct AppCommands: Commands {
             }
             .keyboardShortcut("s", modifiers: [.command, .shift])
 
+            Button("Convert to PDF…") {
+                model.exportPDF()
+            }
+            .keyboardShortcut("e", modifiers: [.command, .shift])
+            .disabled(model.activeText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
             Divider()
 
             Button("Close Tab") {

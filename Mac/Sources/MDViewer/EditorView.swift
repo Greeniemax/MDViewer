@@ -44,10 +44,10 @@ struct MacEditor: NSViewRepresentable {
         textView.textContainer?.widthTracksTextView = true
         textView.textContainer?.containerSize = NSSize(
             width: initialSize.width,
-            height: .greatestFiniteMagnitude
+            height: CGFloat.greatestFiniteMagnitude
         )
         textView.minSize = NSSize(width: 0, height: initialSize.height)
-        textView.maxSize = NSSize(width: .greatestFiniteMagnitude, height: .greatestFiniteMagnitude)
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
 
         let font = NSFont.monospacedSystemFont(ofSize: 14, weight: .regular)
         textView.font = font
@@ -164,7 +164,7 @@ final class LineNumberRulerView: NSRulerView {
         ruleThickness = 44
     }
 
-    required init?(coder: NSCoder) {
+    required init(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 

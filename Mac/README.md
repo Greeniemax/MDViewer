@@ -84,6 +84,9 @@ The folder must contain the `piper` executable and a `voices/` subdirectory.
 - **Recent files** — the ten most recent files, persisted across launches.
 - **Find** — live search with match-case and whole-word options, next/previous,
   a match counter, and selection/scroll in both editor and viewer.
+- **Convert to PDF** — renders the whole current document (including unsaved
+  edits) to a paginated A4 PDF through a native Save dialog, with headings,
+  lists, quotes, code blocks, and tables. Runs entirely offline with AppKit.
 - **External change watching** — polling watcher reloads changed files without
   clobbering unsaved edits.
 - **Drag and drop** — drop `.md`, `.markdown`, or `.txt` files onto the window.
@@ -98,6 +101,7 @@ The folder must contain the `piper` executable and a `voices/` subdirectory.
 | Open | `⌘O` |
 | Save | `⌘S` |
 | Save As | `⇧⌘S` |
+| Convert to PDF | `⇧⌘E` |
 | Close tab | `⌘W` |
 | Find | `⌘F` |
 | Speak / resume from selected line | `⌘↩` |
@@ -123,6 +127,7 @@ Mac/
     ├── ContentView.swift      # window chrome, toolbar, find bar, status bar
     ├── SpeechEngine.swift     # prefetch + file-then-play TTS pipeline
     ├── VoiceCatalog.swift     # Piper + `say -v ?` discovery and cache
+    ├── PDFExport.swift        # markdown -> attributed string -> PDF
     ├── FileWatcher.swift      # polling external-change watcher
     └── Theme.swift            # colors and button styles
 ```

@@ -12,6 +12,7 @@
 - Click-to-Select — Click word in viewer to set reading position
 - Voice Controls — Multiple voices with adjustable rate (100-250 WPM)
 - Visual Highlighting — Line highlighting during TTS with animated pulse
+- Convert to PDF — save the whole document as a separate PDF; Windows uses Edge/Chrome headless printing, macOS uses native AppKit printing
 
 ## Tech Stack
 | Component | Technology |
@@ -22,6 +23,7 @@
 | Build Tool | Vite |
 | TTS Backend | macOS: `say`/`afplay`, Windows: SAPI via PowerShell |
 | Native macOS app | Swift 5.9, SwiftUI + AppKit, Swift Package Manager |
+| PDF export | Windows: Edge/Chrome headless `--print-to-pdf`; macOS: AppKit `NSPrintOperation` |
 
 ## Current State
 **Status:** Active development
@@ -34,6 +36,7 @@
 ```
 MDViewer/
 ├── app.go                    # Main Go application (TTS logic)
+├── pdf.go                    # HTML -> PDF export via Edge/Chrome headless
 ├── go.mod / go.sum           # Dependencies
 ├── wails.json                # Wails configuration
 ├── frontend/
@@ -47,6 +50,7 @@ MDViewer/
 ├── Docs/                     # 20 development documentation files
 ├── Mac/                      # Native macOS Swift port (SwiftPM + AppKit/SwiftUI)
 │   ├── Sources/MDViewer/     # app, editor, viewer, markdown parser, TTS engine
+│   ├── Sources/MDViewer/PDFExport.swift  # markdown -> attributed string -> PDF
 │   ├── build.sh              # builds MDViewer.app, bundles Piper, ad-hoc signs
 │   └── README.md             # macOS build/run instructions
 ├── build/                    # Build output
@@ -64,7 +68,7 @@ MDViewer/
 
 ## Next Steps
 1. Add syntax highlighting for code blocks
-2. Export to HTML/PDF
+2. Export to HTML
 3. Add themes
 4. Keyboard shortcuts
 5. macOS TTS optimization
@@ -128,6 +132,30 @@ MDViewer/
   open, the reused editor text view resets its undo stack/selection per tab,
   the voice picker includes the "Default Voice" option, and `build.sh` now uses
   an `ls` glob check instead of bash-4-only `compgen -G` (macOS ships bash 3.2).
+- **CI compile fixes:** the first macOS run failed on two Swift errors:
+  `NSRulerView.init(coder:)` is non-failable (so `EditorView`'s required
+  initializer must not be `init?`), and `NSSize(width: .greatestFiniteMagnitude,
+  ...)` was ambiguous between `CGFloat` and `Double`. Both are fixed.
+- **Convert to PDF (Windows + macOS).** Added a "Convert to PDF" button to both
+  apps. It converts the whole active document (including unsaved edits) and
+  opens a native Save dialog so the PDF is written to a separate file:
+  - **Windows:** new `pdf.go` binding `ExportPDF(html, suggestedName)`. The
+    frontend builds a standalone print HTML document from the current markdown
+    render (A4 `@page`, light print theme), and Go prints it with headless
+    Edge/Chrome (`--print-to-pdf`), trying Chrome then Edge plus both headless
+    modes so policy-disabled Edge installs still work. PDFs are validated by
+    the `%PDF-` header before returning the path. The button disables itself
+    while converting and tracks whether the document has content.
+  - **macOS:** new `PDFExport.swift` renders parsed markdown blocks into a
+    styled `NSAttributedString` (headings, inline bold/italic/code/links,
+    lists, quotes, fenced code, padded monospaced tables, rules) and uses
+    `NSPrintOperation.pdfOperation` into A4 PDF data. `AppModel.exportPDF()`
+    drives `NSSavePanel` (default `<name>.pdf`, current file's folder) and
+    offers Show in Finder. The button lives in the document-tabs row; the File
+    menu and `⇧⌘E` also invoke it.
+  - Windows: `go vet ./...` and `go test ./...` pass; `build.bat` produced
+    `build/bin/MDViewer.exe`. A real Chrome headless smoke test produced a
+    valid PDF. Mac compile verification is via the macOS CI workflow.
 
 ### 2026-06-24
 - **Natural TTS (Piper) — design approved.** The robotic voice is inherent to

@@ -48,6 +48,13 @@ keyboard shortcuts.
 - Visual line highlighting during speech
 - Stop/Start controls
 
+### 📕 Convert to PDF
+- One-click **Convert to PDF** button in both the Windows and macOS apps
+- Converts the whole current document, including unsaved edits, to a PDF
+- Opens a native Save dialog so the PDF is written to a separate file
+- **Windows** renders through the installed Microsoft Edge or Google Chrome
+- **macOS** renders natively with AppKit, entirely offline
+
 ## Requirements
 
 ### macOS
@@ -61,6 +68,7 @@ keyboard shortcuts.
 - Bundled Piper neural TTS engine (included in the build; ~180 MB fetch at build time)
 - Windows Speech API (SAPI) — pre-installed with Windows (used as fallback)
 - PowerShell 5.0 or later (pre-installed with Windows 10+)
+- Microsoft Edge or Google Chrome (pre-installed on most systems; used for PDF export)
 
 ## Installation
 
@@ -169,12 +177,14 @@ Currently, all actions are toolbar-based. Future versions may include keyboard s
   - Primary: Piper neural TTS engine (bundled, offline, no API key)
   - Fallback — macOS: Native `say` command
   - Fallback — Windows: Windows Speech API (SAPI) via PowerShell
+- **PDF export**: Edge or Chrome headless printing on Windows; native AppKit printing on macOS
 
 ## Project Structure
 
 ```
 MDViewer/
 ├── app.go                  # Main Go application and TTS logic
+├── pdf.go                  # HTML-to-PDF export via Edge/Chrome headless
 ├── frontend/
 │   ├── src/
 │   │   ├── main.js         # Frontend application logic

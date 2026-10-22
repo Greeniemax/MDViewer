@@ -232,14 +232,26 @@ struct ContentView: View {
     // MARK: - Document tabs
 
     private var documentTabs: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 3) {
-                ForEach(model.tabs) { tab in
-                    documentTab(tab)
+        HStack(spacing: 8) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 3) {
+                    ForEach(model.tabs) { tab in
+                        documentTab(tab)
+                    }
                 }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
+
+            Button {
+                model.exportPDF()
+            } label: {
+                Label("Convert to PDF", systemImage: "doc.richtext")
+            }
+            .buttonStyle(MDSmallButtonStyle())
+            .help("Convert the whole file to PDF")
+            .disabled(model.activeText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .padding(.trailing, 8)
         }
         .frame(height: 32)
         .background(Theme.background)

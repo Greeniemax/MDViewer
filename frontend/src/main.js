@@ -4,6 +4,7 @@ import { EventsOn } from '../wailsjs/runtime/runtime';
 import { 
     OpenFileDialog, 
     SaveFileDialog, 
+    ExportPDF,
     ReadFile, 
     GetCurrentFile,
     GetContent,
@@ -42,6 +43,7 @@ const lineNumbers = document.getElementById('lineNumbers');
 const viewer = document.getElementById('viewer');
 const openBtn = document.getElementById('openBtn');
 const saveBtn = document.getElementById('saveBtn');
+const pdfBtn = document.getElementById('pdfBtn');
 const speakBtn = document.getElementById('speakBtn');
 const stopBtn = document.getElementById('stopBtn');
 const voiceSelect = document.getElementById('voiceSelect');
@@ -179,6 +181,7 @@ function switchToDocTab(id) {
     filePathEl.textContent = tab.path || 'No file open';
     wordCountEl.textContent = `${countWords(tab.value)} words`;
     saveBtn.disabled = false;
+    pdfBtn.disabled = !tab.value.trim();
     speakBtn.disabled = !tab.value.trim();
 
     if (viewerContent.classList.contains('active')) {
@@ -202,6 +205,7 @@ function closeDocTab(id) {
         updateLineNumbers();
         filePathEl.textContent = 'No file open';
         wordCountEl.textContent = '0 words';
+        pdfBtn.disabled = true;
         speakBtn.disabled = true;
         if (viewerContent.classList.contains('active')) {
             renderMarkdown('');
@@ -271,6 +275,7 @@ function ensureDefaultUntitledTab() {
     filePathEl.textContent = 'No file open';
     wordCountEl.textContent = '0 words';
     saveBtn.disabled = false;
+    pdfBtn.disabled = true;
     speakBtn.disabled = true;
     syncGoActiveDocument();
     renderDocTabsBar();
@@ -428,6 +433,134 @@ saveBtn.addEventListener('click', async () => {
     }
 });
 
+// Convert the whole current document to a PDF. The HTML is rendered by the
+// same markdown renderer as the Viewer pane so the PDF matches what the app
+// displays. The Go side opens a Save dialog and prints the HTML with a
+// headless Chromium browser.
+pdfBtn.addEventListener('click', async () => {
+    const originalMarkup = pdfBtn.innerHTML;
+    try {
+        flushActiveTabEditor();
+        const tab = getActiveDocTab();
+        const text = tab ? tab.value : editor.value;
+        if (!text.trim()) return;
+
+        // Keep the rendered pane in sync with the editor, even when the
+        // button is pressed while the Editor tab is visible.
+        renderMarkdown(text);
+
+        const rawTitle = (tab && tab.title) || 'document';
+        const baseName = rawTitle.replace(/\.[^.]+$/, '') || 'document';
+        const html = buildPdfDocument(viewer.innerHTML, baseName);
+
+        pdfBtn.disabled = true;
+        pdfBtn.innerHTML = '<span>⏳</span> Converting…';
+        const savedPath = await ExportPDF(html, baseName + '.pdf');
+        if (savedPath) {
+            alert('PDF saved successfully!\n' + savedPath);
+        }
+    } catch (err) {
+        console.error('Error converting to PDF:', err);
+        alert('Error converting to PDF:\n' + err);
+    } finally {
+        pdfBtn.innerHTML = originalMarkup;
+        flushActiveTabEditor();
+        const tab = getActiveDocTab();
+        pdfBtn.disabled = !(tab && tab.value.trim());
+    }
+});
+
+function buildPdfDocument(bodyHtml, title) {
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>${escapeHtml(title)}</title>
+<style>
+    @page { size: A4; margin: 18mm 16mm; }
+    * { box-sizing: border-box; }
+    html, body { background: #ffffff; }
+    body {
+        margin: 0;
+        font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+        font-size: 11.5pt;
+        line-height: 1.55;
+        color: #1f2328;
+    }
+    h1, h2, h3, h4, h5, h6 {
+        color: #111111;
+        line-height: 1.25;
+        margin: 1.15em 0 0.45em;
+        page-break-after: avoid;
+    }
+    h1 { font-size: 24pt; border-bottom: 1px solid #d8dee4; padding-bottom: 6px; }
+    h2 { font-size: 19pt; border-bottom: 1px solid #e4e8ec; padding-bottom: 4px; }
+    h3 { font-size: 15.5pt; }
+    h4 { font-size: 13pt; }
+    h5 { font-size: 12pt; }
+    h6 { font-size: 11pt; color: #57606a; }
+    p { margin: 0.55em 0; }
+    ul, ol { margin: 0.5em 0 0.7em 1.5em; padding: 0; }
+    li { margin: 0.2em 0; }
+    li > ul, li > ol { margin: 0.2em 0 0.2em 1.1em; }
+    blockquote {
+        margin: 0.8em 0;
+        padding: 0.25em 0 0.25em 0.9em;
+        border-left: 3px solid #c9d1d9;
+        color: #57606a;
+    }
+    hr { border: 0; border-top: 1px solid #d0d7de; margin: 1.2em 0; }
+    a { color: #0969da; text-decoration: none; }
+    strong { font-weight: 600; }
+    pre {
+        background: #f6f8fa;
+        border: 1px solid #e5e7eb;
+        border-radius: 5px;
+        padding: 10px 12px;
+        margin: 0.8em 0;
+        overflow: hidden;
+        white-space: pre-wrap;
+        word-wrap: break-word;
+        page-break-inside: avoid;
+    }
+    code {
+        font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+        font-size: 9.5pt;
+    }
+    p code, li code, blockquote code {
+        background: #f3f4f6;
+        border: 1px solid #e5e7eb;
+        border-radius: 3px;
+        padding: 0 3px;
+    }
+    table.md-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 0.8em 0;
+        font-size: 10pt;
+    }
+    table.md-table th, table.md-table td {
+        border: 1px solid #d0d7de;
+        padding: 5px 8px;
+        text-align: left;
+        vertical-align: top;
+    }
+    table.md-table th { background: #f2f4f7; font-weight: 600; }
+    table.md-table tr { page-break-inside: avoid; }
+    img { max-width: 100%; height: auto; }
+    .clickable-line { cursor: default; }
+    .no-file { color: #57606a; text-align: center; padding: 40px 0; }
+    .no-file-icon { font-size: 36pt; }
+    .no-file-text { font-size: 16pt; font-weight: 600; margin-top: 8px; }
+    .no-file-hint { font-size: 10pt; margin-top: 4px; }
+</style>
+</head>
+<body>
+${bodyHtml}
+</body>
+</html>`;
+}
+
 // Editor line numbers
 function updateLineNumbers() {
     const lineCount = editor.value.split('\n').length;
@@ -445,6 +578,7 @@ editor.addEventListener('input', () => {
     const text = editor.value;
     wordCountEl.textContent = `${countWords(text)} words`;
     content = text;
+    pdfBtn.disabled = !text.trim();
     speakBtn.disabled = !text.trim();
 });
 
@@ -1416,6 +1550,7 @@ EventsOn('document-disk-changed', (payload) => {
         content = newContent;
         updateLineNumbers();
         wordCountEl.textContent = `${countWords(newContent)} words`;
+        pdfBtn.disabled = !newContent.trim();
         speakBtn.disabled = !newContent.trim();
         if (viewerContent.classList.contains('active')) {
             renderMarkdown(newContent);
