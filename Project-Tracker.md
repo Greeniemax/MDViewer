@@ -156,6 +156,17 @@ MDViewer/
   - Windows: `go vet ./...` and `go test ./...` pass; `build.bat` produced
     `build/bin/MDViewer.exe`. A real Chrome headless smoke test produced a
     valid PDF. Mac compile verification is via the macOS CI workflow.
+- **macOS CI is green.** The second run compiled the Swift package, packaged
+  `MDViewer.app`, and uploaded the artifact. The only remaining packaging
+  failure was `build.sh` treating the UTF-8 ellipsis after `$APP` as part of
+  the variable name under bash 3.2's `set -u`; the echo strings now use ASCII
+  `...`.
+- **Windows PDF pipeline is covered by a real integration test.** Refactored
+  `pdf.go` so the save-dialog flow calls a testable `printHTMLToPDF`, and added
+  `pdf_test.go` (`TestValidPDF` + `TestPrintHTMLToPDF`). The integration test
+  invokes the discovered Edge/Chrome headless binary, writes a PDF, and checks
+  the `%PDF-` header; it passes on this machine via Chrome in ~5s. `wails build
+  -s` rebuilt `build/bin/MDViewer.exe` with the final pipeline.
 
 ### 2026-06-24
 - **Natural TTS (Piper) — design approved.** The robotic voice is inherent to

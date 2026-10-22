@@ -55,20 +55,30 @@ func (a *App) ExportPDF(html, suggestedName string) (string, error) {
 		path += ".pdf"
 	}
 
+	if err := printHTMLToPDF(html, path); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+// printHTMLToPDF renders html into a PDF at path using the first Chromium-based
+// browser that succeeds. It is separate from ExportPDF so the browser pipeline
+// can be tested without opening a native save dialog.
+func printHTMLToPDF(html, path string) error {
 	browsers, err := findPDFBrowsers()
 	if err != nil {
-		return "", err
+		return err
 	}
 
 	tmpDir, err := os.MkdirTemp("", "mdviewer-pdf-*")
 	if err != nil {
-		return "", err
+		return err
 	}
 	defer os.RemoveAll(tmpDir)
 
 	htmlPath := filepath.Join(tmpDir, "document.html")
 	if err := os.WriteFile(htmlPath, []byte(html), 0o644); err != nil {
-		return "", err
+		return err
 	}
 
 	// Chrome/Edge resolve relative assets against the page's own URL. The
@@ -116,7 +126,7 @@ func (a *App) ExportPDF(html, suggestedName string) (string, error) {
 			// may take a moment to be fully flushed.
 			for attempt := 0; attempt < 25; attempt++ {
 				if validPDF(path) {
-					return path, nil
+					return nil
 				}
 				time.Sleep(100 * time.Millisecond)
 			}
@@ -124,9 +134,9 @@ func (a *App) ExportPDF(html, suggestedName string) (string, error) {
 	}
 
 	if lastOutput != "" {
-		return "", fmt.Errorf("could not create PDF: %s", lastOutput)
+		return fmt.Errorf("could not create PDF: %s", lastOutput)
 	}
-	return "", fmt.Errorf("could not create PDF: no Chromium-based browser was able to print the document")
+	return fmt.Errorf("could not create PDF: no Chromium-based browser was able to print the document")
 }
 
 // validPDF reports whether path exists, is non-empty, and begins with the
