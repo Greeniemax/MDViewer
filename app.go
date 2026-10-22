@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"embed"
-	"fmt"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,8 +12,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"MDViewer/internal/tts"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/wailsapp/wails/v2"
@@ -27,24 +25,30 @@ var assets embed.FS
 
 // App struct
 type App struct {
-	ctx         context.Context
-	currentFile string
-	content     string
-	ttsProcess     *exec.Cmd
-	ttsMutex       sync.Mutex
-	isSpeaking     bool
-	stopRequested  bool
+	ctx           context.Context
+	currentFile   string
+	content       string
+	ttsProcess    *exec.Cmd
+	ttsMutex      sync.Mutex
+	isSpeaking    bool
+	stopRequested bool
+	prefetch      map[string]*prefetchedAudio
 
 	watchMu      sync.Mutex
 	fileWatcher  *fsnotify.Watcher
 	watchedAbs   map[string]struct{}
 	reloadTimer  map[string]*time.Timer
 	lastAppWrite map[string]time.Time
+
+	voicesMu         sync.Mutex
+	voicesRefreshing bool
 }
 
 // NewApp creates a new App application struct
 func NewApp() *App {
-	return &App{}
+	return &App{
+		prefetch: make(map[string]*prefetchedAudio),
+	}
 }
 
 // startupFileFromArgs returns the path passed when Windows opens a file
@@ -187,87 +191,88 @@ func (a *App) GetContent() string {
 	return a.content
 }
 
-// SpeakLine speaks a single line and waits for completion
-func (a *App) SpeakLine(text string, voice string, rate int) error {
+// StartSpeaking begins a new reading session: it clears the stop flag and
+// discards any audio that was prefetched for a previous session.
+func (a *App) StartSpeaking() {
 	a.ttsMutex.Lock()
+	a.stopRequested = false
+	paths := make([]string, 0, len(a.prefetch))
+	for _, entry := range a.prefetch {
+		if entry.path != "" {
+			paths = append(paths, entry.path)
+		}
+	}
+	a.prefetch = make(map[string]*prefetchedAudio)
+	a.ttsMutex.Unlock()
 
-	// Check if empty line
+	for _, path := range paths {
+		os.Remove(path)
+	}
+}
+
+// SpeakLine speaks a single line and waits for completion. If the same line
+// was prefetched (see PrefetchLine), playback starts immediately because the
+// audio file is already rendered.
+func (a *App) SpeakLine(text string, voice string, rate int) error {
 	if strings.TrimSpace(text) == "" {
-		a.ttsMutex.Unlock()
 		return nil // Skip empty lines silently
 	}
 
+	a.ttsMutex.Lock()
 	a.isSpeaking = true
 	a.stopRequested = false
+
+	key := prefetchKey(text, voice, rate)
+	entry, prefetched := a.prefetch[key]
+	if prefetched {
+		entry.claimed = true
+	}
 	a.ttsMutex.Unlock()
 
+	var path string
 	var err error
-	if id, ok := tts.PiperVoiceID(voice); ok {
-		err = a.speakLinePiper(text, id, rate)
-		if err != nil {
-			a.ttsMutex.Lock()
-			stopped := a.stopRequested
-			a.ttsMutex.Unlock()
-			if !stopped {
-				// Natural engine failed (not a user Stop) — fall back to the native voice.
-				if runtimePkg.GOOS == "windows" {
-					err = a.speakLineWindows(text, "", rate)
-				} else {
-					err = a.speakLineMacOS(text, "", rate)
-				}
-			}
+	if prefetched {
+		// Wait for the background render; in the normal flow it is already done
+		// because it ran while the previous line was playing.
+		<-entry.done
+		path, err = entry.path, entry.err
+
+		a.ttsMutex.Lock()
+		if a.prefetch[key] == entry {
+			delete(a.prefetch, key)
 		}
-	} else if runtimePkg.GOOS == "windows" {
-		err = a.speakLineWindows(text, voice, rate)
+		a.ttsMutex.Unlock()
 	} else {
-		err = a.speakLineMacOS(text, voice, rate)
+		path, err = a.synthesizeToFile(text, voice, rate, nil)
 	}
 
-	// Update state after completion
+	a.ttsMutex.Lock()
+	stopped := a.stopRequested
+	a.ttsMutex.Unlock()
+	if stopped {
+		if path != "" {
+			os.Remove(path)
+		}
+		a.finishSpeaking()
+		return nil
+	}
+
+	if err == nil && path != "" {
+		err = a.playAudioFile(path)
+	}
+	if path != "" {
+		os.Remove(path)
+	}
+
+	a.finishSpeaking()
+	return err
+}
+
+func (a *App) finishSpeaking() {
 	a.ttsMutex.Lock()
 	a.isSpeaking = false
 	a.ttsProcess = nil
 	a.ttsMutex.Unlock()
-
-	return err
-}
-
-// speakLineMacOS speaks a line using macOS say command
-func (a *App) speakLineMacOS(text string, voice string, rate int) error {
-	// Create temp file for audio output to ensure complete processing
-	tmpFile := fmt.Sprintf("/tmp/mdviewer_tts_%d.aiff", time.Now().UnixNano())
-
-	var cmd *exec.Cmd
-	if voice != "" && voice != "default" {
-		cmd = exec.Command("say", "-v", voice, "-r", fmt.Sprintf("%d", rate), "-o", tmpFile, "--file-format=AIFF", text)
-	} else {
-		cmd = exec.Command("say", "-r", fmt.Sprintf("%d", rate), "-o", tmpFile, "--file-format=AIFF", text)
-	}
-
-	a.ttsMutex.Lock()
-	a.ttsProcess = cmd
-	a.ttsMutex.Unlock()
-
-	// Run and wait for file creation
-	err := cmd.Run()
-	
-	if err != nil {
-		return err
-	}
-
-	// Now play the complete audio file
-	playCmd := exec.Command("afplay", tmpFile)
-	
-	a.ttsMutex.Lock()
-	a.ttsProcess = playCmd
-	a.ttsMutex.Unlock()
-	
-	err = playCmd.Run()
-
-	// Clean up temp file
-	os.Remove(tmpFile)
-
-	return err
 }
 
 // escapePowerShellSingleQuoted escapes text for use inside PowerShell single-quoted strings.
@@ -301,135 +306,44 @@ func wpmToOneCoreRate(rate int) float64 {
 	return speakingRate
 }
 
-func (a *App) runHiddenPowerShell(script string) error {
-	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", script)
-	hideProcessWindow(cmd)
-
-	a.ttsMutex.Lock()
-	a.ttsProcess = cmd
-	a.ttsMutex.Unlock()
-
-	return cmd.Run()
-}
-
-// speakLineWindows speaks a line using Windows SAPI or OneCore voices.
-func (a *App) speakLineWindows(text string, voice string, rate int) error {
-	engine, voiceID := parseWindowsVoice(voice)
-	if engine == "onecore" {
-		return a.speakLineWindowsOneCore(text, voiceID, rate)
-	}
-	return a.speakLineWindowsSAPI(text, voiceID, rate)
-}
-
-// speakLineWindowsSAPI speaks using legacy SAPI desktop voices (System.Speech).
-func (a *App) speakLineWindowsSAPI(text, voiceID string, rate int) error {
-	escapedText := escapePowerShellSingleQuoted(text)
-
-	sapiRate := ((rate - 175) * 5) / 75
-	if sapiRate < -10 {
-		sapiRate = -10
-	}
-	if sapiRate > 10 {
-		sapiRate = 10
-	}
-
-	psScript := fmt.Sprintf(`
-Add-Type -AssemblyName System.Speech
-$synth = New-Object System.Speech.Synthesis.SpeechSynthesizer
-$synth.Rate = %d
-`, sapiRate)
-
-	if voiceID != "" {
-		escapedVoice := escapePowerShellSingleQuoted(voiceID)
-		psScript += fmt.Sprintf(`
-try {
-    $synth.SelectVoice('%s')
-} catch {
-    # If voice selection fails, use default
-}
-`, escapedVoice)
-	}
-
-	psScript += fmt.Sprintf(`
-$synth.Speak('%s')
-$synth.Dispose()
-`, escapedText)
-
-	return a.runHiddenPowerShell(psScript)
-}
-
-// speakLineWindowsOneCore speaks using Windows OneCore voices (Settings > Speech / language packs).
-func (a *App) speakLineWindowsOneCore(text, voiceID string, rate int) error {
-	escapedText := escapePowerShellSingleQuoted(text)
-	speakingRate := wpmToOneCoreRate(rate)
-
-	psScript := fmt.Sprintf(`
-Add-Type -AssemblyName System.Runtime.WindowsRuntime
-[Windows.Foundation.IAsyncOperation`+"`"+`1, Windows.Foundation, ContentType=WindowsRuntime] | Out-Null
-[Windows.Media.SpeechSynthesis.SpeechSynthesizer, Windows.Media.SpeechSynthesis, ContentType=WindowsRuntime] | Out-Null
-[Windows.Media.SpeechSynthesis.SpeechSynthesisStream, Windows.Media.SpeechSynthesis, ContentType=WindowsRuntime] | Out-Null
-$_taskMethods = [System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {
-    $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1
-}
-$asTaskGeneric = ($_taskMethods | Where-Object { $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`+"`"+`1' })[0]
-Function Await($WinRtTask, $ResultType) {
-    $asTask = $asTaskGeneric.MakeGenericMethod($ResultType)
-    $netTask = $asTask.Invoke($null, @($WinRtTask))
-    $netTask.Wait(-1) | Out-Null
-    $netTask.Result
-}
-$synth = New-Object Windows.Media.SpeechSynthesis.SpeechSynthesizer
-$synth.Options.SpeakingRate = %g
-`, speakingRate)
-
-	if voiceID != "" {
-		escapedVoice := escapePowerShellSingleQuoted(voiceID)
-		psScript += fmt.Sprintf(`
-$selected = [Windows.Media.SpeechSynthesis.SpeechSynthesizer]::AllVoices | Where-Object { $_.Id -eq '%s' } | Select-Object -First 1
-if ($selected) { $synth.Voice = $selected }
-`, escapedVoice)
-	}
-
-	psScript += fmt.Sprintf(`
-$winrtStream = Await ($synth.SynthesizeTextToStreamAsync('%s')) ([Windows.Media.SpeechSynthesis.SpeechSynthesisStream])
-$stream = [System.IO.WindowsRuntimeStreamExtensions]::AsStreamForRead($winrtStream)
-$player = New-Object System.Media.SoundPlayer $stream
-$player.PlaySync()
-$player.Dispose()
-$stream.Dispose()
-$winrtStream.Dispose()
-$synth.Dispose()
-`, escapedText)
-
-	return a.runHiddenPowerShell(psScript)
-}
-
-// Stop stops the current TTS
+// Stop stops the current TTS immediately: it kills the audio player and any
+// in-flight background synthesis, and drops all prefetched audio.
 func (a *App) Stop() error {
 	a.ttsMutex.Lock()
-	defer a.ttsMutex.Unlock()
 	a.stopRequested = true
+	player := a.ttsProcess
+	a.ttsProcess = nil
+	a.isSpeaking = false
 
-	if a.ttsProcess != nil {
-		if runtimePkg.GOOS == "windows" {
-			// Kill PowerShell processes running SAPI
-			exec.Command("taskkill", "/F", "/IM", "powershell.exe", "/FI", "WINDOWTITLE eq Windows PowerShell").Run()
-			exec.Command("taskkill", "/F", "/IM", "piper.exe").Run()
-			// Also try to kill by process tree
-			if a.ttsProcess.Process != nil {
-				a.ttsProcess.Process.Kill()
-			}
-		} else {
-			// Kill the tracked process (piper synth or its audio player) directly,
-			// then sweep the native players.
-			if a.ttsProcess.Process != nil {
-				a.ttsProcess.Process.Kill()
-			}
-			exec.Command("pkill", "-f", "say").Run()
-			exec.Command("pkill", "-f", "afplay").Run()
+	prefetch := a.prefetch
+	a.prefetch = make(map[string]*prefetchedAudio)
+
+	synths := make([]*exec.Cmd, 0, len(prefetch))
+	paths := make([]string, 0, len(prefetch))
+	for _, entry := range prefetch {
+		if entry.cmd != nil {
+			synths = append(synths, entry.cmd)
 		}
-		a.ttsProcess = nil
-		a.isSpeaking = false
+		if entry.path != "" {
+			paths = append(paths, entry.path)
+		}
+	}
+	a.ttsMutex.Unlock()
+
+	// Kill the active player first so audio goes silent right away.
+	killProcessTree(player)
+	for _, cmd := range synths {
+		killProcessTree(cmd)
+	}
+	for _, path := range paths {
+		os.Remove(path)
+	}
+
+	if runtimePkg.GOOS != "windows" {
+		// Sweep players/synthesizers that may have outlived their parent.
+		exec.Command("pkill", "-f", "afplay").Run()
+		exec.Command("pkill", "-f", "say").Run()
+		exec.Command("pkill", "-f", "piper").Run()
 	}
 	return nil
 }
@@ -441,21 +355,102 @@ func (a *App) IsSpeaking() bool {
 	return a.isSpeaking
 }
 
-// GetAvailableVoices returns list of available TTS voices
+// GetAvailableVoices returns list of available TTS voices. Native voice
+// enumeration is expensive on Windows (it starts PowerShell), so the last
+// result is cached and returned immediately. A background refresh keeps the
+// cache current and notifies the UI if the list changed.
 func (a *App) GetAvailableVoices() ([]string, error) {
 	piper := a.getPiperVoices()
 
-	var native []string
-	var err error
-	if runtimePkg.GOOS == "windows" {
-		native, err = a.getAvailableVoicesWindows()
+	native, cached := loadNativeVoicesCache()
+	if cached {
+		a.refreshNativeVoicesAsync()
 	} else {
-		native, err = a.getAvailableVoicesMacOS()
+		var err error
+		native, err = a.queryNativeVoices()
+		if err != nil && len(piper) == 0 {
+			return nil, err
+		}
+		if err == nil {
+			saveNativeVoicesCache(native)
+		}
 	}
-	if err != nil && len(piper) == 0 {
-		return nil, err
-	}
+
 	return append(piper, native...), nil
+}
+
+func (a *App) queryNativeVoices() ([]string, error) {
+	if runtimePkg.GOOS == "windows" {
+		return a.getAvailableVoicesWindows()
+	}
+	return a.getAvailableVoicesMacOS()
+}
+
+func (a *App) refreshNativeVoicesAsync() {
+	a.voicesMu.Lock()
+	if a.voicesRefreshing {
+		a.voicesMu.Unlock()
+		return
+	}
+	a.voicesRefreshing = true
+	a.voicesMu.Unlock()
+
+	go func() {
+		defer func() {
+			a.voicesMu.Lock()
+			a.voicesRefreshing = false
+			a.voicesMu.Unlock()
+		}()
+
+		native, err := a.queryNativeVoices()
+		if err != nil {
+			return
+		}
+		if err := saveNativeVoicesCache(native); err != nil {
+			return
+		}
+		voices := append(a.getPiperVoices(), native...)
+		runtime.EventsEmit(a.ctx, "voices-updated", voices)
+	}()
+}
+
+func nativeVoicesCachePath() string {
+	dir, err := os.UserCacheDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(dir, "MDViewer", "native_voices.json")
+}
+
+func loadNativeVoicesCache() ([]string, bool) {
+	path := nativeVoicesCachePath()
+	if path == "" {
+		return nil, false
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, false
+	}
+	var voices []string
+	if err := json.Unmarshal(data, &voices); err != nil || voices == nil {
+		return nil, false
+	}
+	return voices, true
+}
+
+func saveNativeVoicesCache(voices []string) error {
+	path := nativeVoicesCachePath()
+	if path == "" {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	data, err := json.Marshal(voices)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o644)
 }
 
 // getAvailableVoicesMacOS returns available voices on macOS

@@ -22,6 +22,10 @@ export function OpenFileDialog() {
   return window['go']['main']['App']['OpenFileDialog']();
 }
 
+export function PrefetchLine(arg1, arg2, arg3) {
+  return window['go']['main']['App']['PrefetchLine'](arg1, arg2, arg3);
+}
+
 export function ReadFile(arg1) {
   return window['go']['main']['App']['ReadFile'](arg1);
 }
@@ -44,6 +48,10 @@ export function SetWatchedFilePaths(arg1) {
 
 export function SpeakLine(arg1, arg2, arg3) {
   return window['go']['main']['App']['SpeakLine'](arg1, arg2, arg3);
+}
+
+export function StartSpeaking() {
+  return window['go']['main']['App']['StartSpeaking']();
 }
 
 export function Stop() {

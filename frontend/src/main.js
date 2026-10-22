@@ -9,6 +9,8 @@ import {
     GetContent,
     SetActiveDocument,
     SetWatchedFilePaths,
+    StartSpeaking,
+    PrefetchLine,
     SpeakLine,
     Stop, 
     IsSpeaking,
@@ -662,7 +664,6 @@ function attachClickListeners() {
             if (isSpeaking) {
                 shouldStopSpeaking = true;
                 await Stop();
-                await sleep(300);
             }
 
             // Start speaking from this line
@@ -713,6 +714,9 @@ speakBtn.addEventListener('click', async () => {
         
         // Get all lines from content
         currentLines = content.split('\n');
+
+        // Reset the backend session and clear any stale prefetched audio.
+        await StartSpeaking();
         
         // Start speaking from selected line
         await speakLinesSequentially(selectedLineIndex, voice, rate);
@@ -725,73 +729,79 @@ speakBtn.addEventListener('click', async () => {
     }
 });
 
-stopBtn.addEventListener('click', async () => {
+stopBtn.addEventListener('click', () => {
+    // Reset the UI immediately, then ask the backend to kill audio/synthesis.
     shouldStopSpeaking = true;
-    try {
-        await Stop();
-    } catch (err) {
-        console.error('Stop Error:', err);
-    }
     stopSpeaking();
+    Stop().catch((err) => console.error('Stop Error:', err));
 });
 
 async function speakLinesSequentially(startLine, voice, rate) {
+    // Clean every line up front. This lets us render the next line while the
+    // current one is still being spoken, so there is no silent gap between them.
+    const jobs = [];
     for (let i = startLine; i < currentLines.length; i++) {
-        // Check if we should stop
+        const originalLine = currentLines[i];
+        if (!originalLine.trim()) {
+            continue;
+        }
+        const cleaned = cleanMarkdownForSpeech(originalLine);
+        if (!cleaned.trim()) {
+            continue;
+        }
+        jobs.push({ index: i, text: cleaned });
+    }
+
+    if (jobs.length === 0) {
+        return;
+    }
+
+    // Prime the first line before playback begins.
+    try {
+        await PrefetchLine(jobs[0].text, voice || '', rate);
+    } catch (err) {
+        console.error('Prefetch error:', err);
+    }
+
+    for (let k = 0; k < jobs.length; k++) {
         if (shouldStopSpeaking) {
-            console.log('Stopping speech at line', i);
             break;
         }
-        
-        let line = currentLines[i];
-        
-        // Skip empty lines
-        if (!line.trim()) {
-            continue;
+
+        const job = jobs[k];
+
+        // Highlight current line and update status.
+        highlightLine(job.index);
+        readingStatusEl.textContent = `Reading line ${job.index + 1} of ${currentLines.length}...`;
+
+        // Start speaking the current line, then immediately render the next
+        // one in the background while this one plays.
+        const playback = SpeakLine(job.text, voice || '', rate);
+        if (jobs[k + 1]) {
+            try {
+                await PrefetchLine(jobs[k + 1].text, voice || '', rate);
+            } catch (err) {
+                console.error('Prefetch error:', err);
+            }
         }
-        
-        // Clean markdown syntax before speaking
-        const originalLine = line;
-        line = cleanMarkdownForSpeech(line);
-        
-        // Debug: Log what we're processing
-        if (originalLine.startsWith('-') || originalLine.startsWith('*') || originalLine.startsWith('+')) {
-            console.log('Bullet point detected:');
-            console.log('  Original:', originalLine);
-            console.log('  Cleaned:', line);
-        }
-        
-        // Skip if nothing left after cleaning
-        if (!line.trim()) {
-            console.log('  Skipping (empty after cleaning)');
-            continue;
-        }
-        
-        // Highlight current line
-        highlightLine(i);
-        
-        // Update status
-        readingStatusEl.textContent = `Reading line ${i + 1} of ${currentLines.length}...`;
-        
+
         try {
-            // Speak this line and wait for it to complete
-            await SpeakLine(line, voice || '', rate);
+            await playback;
         } catch (err) {
-            console.error('Error speaking line', i, ':', err);
-            // Check if it was intentionally stopped
             if (shouldStopSpeaking) {
                 break;
             }
-            // Otherwise continue to next line
+            console.error('Error speaking line', job.index, ':', err);
+            // Otherwise continue to the next line
         }
-        
-        // Check again after speaking (in case stop was pressed during speech)
+
         if (shouldStopSpeaking) {
             break;
         }
-        
-        // Small pause between lines (backend already has 500ms delay after audio)
-        await sleep(100);
+
+        // Tiny gap between lines (the audio is already prefetched, so this is
+        // just natural breathing room rather than render latency).
+        await sleep(60);
     }
 }
 
@@ -1264,11 +1274,12 @@ contextMenu.addEventListener('click', async (e) => {
             if (isSpeaking) {
                 shouldStopSpeaking = true;
                 try { await Stop(); } catch (err) { /* ignore */ }
-                await sleep(200);
             }
 
             const voice = voiceSelect.value;
             const rate = parseInt(rateSlider.value);
+
+            try { await StartSpeaking(); } catch (err) { /* ignore */ }
 
             readingStatusEl.textContent = 'Speaking selection...';
             loadingIndicator.classList.add('active');
@@ -1290,51 +1301,66 @@ contextMenu.addEventListener('click', async (e) => {
 async function loadVoices() {
     try {
         const voices = await GetAvailableVoices();
-        voiceSelect.innerHTML = '';
-
-        const defaultOpt = document.createElement('option');
-        defaultOpt.value = '';
-        defaultOpt.textContent = 'Default Voice';
-        voiceSelect.appendChild(defaultOpt);
-
-        const naturalGroup = document.createElement('optgroup');
-        naturalGroup.label = 'Natural';
-        const systemGroup = document.createElement('optgroup');
-        systemGroup.label = 'System voices';
-
-        voices.forEach(voice => {
-            const option = document.createElement('option');
-            const tabParts = voice.split('\t');
-            if (tabParts.length >= 3 && tabParts[0] === 'piper') {
-                option.value = 'piper\t' + tabParts[1];
-                option.textContent = tabParts[2];
-                naturalGroup.appendChild(option);
-            } else if (tabParts.length >= 3 && (tabParts[0] === 'sapi' || tabParts[0] === 'onecore')) {
-                option.value = tabParts[0] + '\t' + tabParts[1];
-                option.textContent = tabParts[2];
-                systemGroup.appendChild(option);
-            } else {
-                const sepIndex = voice.indexOf('|');
-                if (sepIndex > 0) {
-                    option.value = voice.substring(0, sepIndex);
-                    option.textContent = voice.substring(0, sepIndex) + ' — ' + voice.substring(sepIndex + 1);
-                } else {
-                    option.value = voice;
-                    option.textContent = voice;
-                }
-                systemGroup.appendChild(option);
-            }
-        });
-
-        if (naturalGroup.children.length > 0) voiceSelect.appendChild(naturalGroup);
-        if (systemGroup.children.length > 0) voiceSelect.appendChild(systemGroup);
-
-        // Prefer a natural (Piper) voice by default.
-        if (naturalGroup.children.length > 0) {
-            voiceSelect.value = naturalGroup.children[0].value;
-        }
+        populateVoices(voices);
     } catch (err) {
         console.error('Error loading voices:', err);
+    }
+}
+
+function populateVoices(voices) {
+    if (!Array.isArray(voices)) return;
+
+    const previousValue = voiceSelect.value;
+    voiceSelect.innerHTML = '';
+
+    const defaultOpt = document.createElement('option');
+    defaultOpt.value = '';
+    defaultOpt.textContent = 'Default Voice';
+    voiceSelect.appendChild(defaultOpt);
+
+    const naturalGroup = document.createElement('optgroup');
+    naturalGroup.label = 'Natural';
+    const systemGroup = document.createElement('optgroup');
+    systemGroup.label = 'System voices';
+
+    voices.forEach(voice => {
+        const option = document.createElement('option');
+        const tabParts = voice.split('\t');
+        if (tabParts.length >= 3 && tabParts[0] === 'piper') {
+            option.value = 'piper\t' + tabParts[1];
+            option.textContent = tabParts[2];
+            naturalGroup.appendChild(option);
+        } else if (tabParts.length >= 3 && (tabParts[0] === 'sapi' || tabParts[0] === 'onecore')) {
+            option.value = tabParts[0] + '\t' + tabParts[1];
+            option.textContent = tabParts[2];
+            systemGroup.appendChild(option);
+        } else {
+            const sepIndex = voice.indexOf('|');
+            if (sepIndex > 0) {
+                option.value = voice.substring(0, sepIndex);
+                option.textContent = voice.substring(0, sepIndex) + ' — ' + voice.substring(sepIndex + 1);
+            } else {
+                option.value = voice;
+                option.textContent = voice;
+            }
+            systemGroup.appendChild(option);
+        }
+    });
+
+    if (naturalGroup.children.length > 0) voiceSelect.appendChild(naturalGroup);
+    if (systemGroup.children.length > 0) voiceSelect.appendChild(systemGroup);
+
+    // Keep the user's selection when the background refresh arrives; otherwise
+    // prefer a natural (Piper) voice by default.
+    if (previousValue) {
+        const stillAvailable = Array.from(voiceSelect.options).some(opt => opt.value === previousValue);
+        if (stillAvailable) {
+            voiceSelect.value = previousValue;
+            return;
+        }
+    }
+    if (naturalGroup.children.length > 0) {
+        voiceSelect.value = naturalGroup.children[0].value;
     }
 }
 
@@ -1347,7 +1373,22 @@ if (rateSlider && rateValue) {
 
 // Initialize
 updateLineNumbers();
-loadVoices();
+
+// Voice enumeration starts PowerShell on Windows (~1.5s). Run it only after the
+// window has loaded and painted, so it never competes with startup rendering.
+// The backend caches the previous result, making later launches instant.
+if (document.readyState === 'complete') {
+    setTimeout(loadVoices, 800);
+} else {
+    window.addEventListener('load', () => setTimeout(loadVoices, 800), { once: true });
+}
+
+// Keep the dropdown fresh if the backend finishes a background refresh.
+EventsOn('voices-updated', (voices) => {
+    if (Array.isArray(voices)) {
+        populateVoices(voices);
+    }
+});
 
 renderRecentMenu();
 

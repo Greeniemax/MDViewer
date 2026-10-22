@@ -11,6 +11,8 @@ export function IsSpeaking():Promise<boolean>;
 
 export function OpenFileDialog():Promise<string>;
 
+export function PrefetchLine(arg1:string,arg2:string,arg3:number):Promise<void>;
+
 export function ReadFile(arg1:string):Promise<string>;
 
 export function SaveFile(arg1:string,arg2:string):Promise<void>;
@@ -22,5 +24,7 @@ export function SetActiveDocument(arg1:string,arg2:string):Promise<void>;
 export function SetWatchedFilePaths(arg1:Array<string>):Promise<void>;
 
 export function SpeakLine(arg1:string,arg2:string,arg3:number):Promise<void>;
+
+export function StartSpeaking():Promise<void>;
 
 export function Stop():Promise<void>;

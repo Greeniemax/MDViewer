@@ -65,6 +65,34 @@ MDViewer/
 
 ## Activity Log
 
+### 2026-10-22
+- **TTS pipeline — next line renders while the current one plays.** Added
+  `PrefetchLine` + a backend prefetch cache (`tts_pipeline.go`). The frontend
+  now pre-renders the upcoming line as soon as the current one starts playing,
+  so there is no silent synthesis gap between paragraphs. All engines use the
+  same file-then-play pipeline: Piper writes WAV, SAPI/OneCore write WAV, and
+  macOS `say` writes AIFF. Piper remains the default with native fallback.
+- **Stop is now immediate.** `Stop()` no longer holds the TTS mutex while
+  killing processes. It kills the active player via `taskkill /F /T /PID` on
+  Windows (tracked process tree) or `Process.Kill` on macOS, kills any
+  in-flight prefetch render, deletes prefetched temp files, and returns at
+  once. The frontend resets the Speak/Stop UI before awaiting the backend, so
+  the button responds instantly. Native SAPI/OneCore synthesis was switched to
+  `SetOutputToWaveFile` / stream-to-file so playback still has a single
+  trackable player process to kill.
+- **Faster startup / no background voice scan at launch.** Native voice
+  enumeration (PowerShell SAPI + OneCore, ~1.5s) used to start during page
+  load. It is now deferred until after `window.load` + 800ms, and its result is
+  cached at `%LOCALAPPDATA%\MDViewer\native_voices.json`. Cached launches return
+  the dropdown instantly and refresh the cache in the background
+  (`voices-updated` event updates the list without resetting the user's
+  selection). This removes the PowerShell burst that competed with WebView2
+  startup.
+- **Verified:** real run showed Piper synthesizing line N+1 while line N's
+  player was active; Stop removed the player and synth processes within one
+  poll (<1s). SAPI and OneCore file-render scripts each produced valid RIFF/WAV
+  output.
+
 ### 2026-06-24
 - **Natural TTS (Piper) — design approved.** The robotic voice is inherent to
   the OS engines (Windows SAPI/OneCore, macOS `say`). Decided to bundle the
@@ -103,4 +131,4 @@ MDViewer/
   new tab instead of reusing the active one.)
 
 ---
-*Last Updated: 2026-06-24*
+*Last Updated: 2026-10-22*
