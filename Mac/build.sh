@@ -14,7 +14,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-echo "==> Building MDViewer (release)…"
+echo "==> Building MDViewer (release)..."
 swift build -c release
 
 ARCH="$(uname -m)"
@@ -31,7 +31,7 @@ if [ ! -x "$BIN" ]; then
     exit 1
 fi
 
-echo "==> Packaging $APP…"
+echo "==> Packaging $APP..."
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/MDViewer"
