@@ -75,8 +75,33 @@ MDViewer/
 5. macOS TTS optimization
 6. ~~Verify the native Mac app build on macOS~~ — verified: builds and runs on
    macOS 26.6 with Command Line Tools only
+7. Implement Paradee + Kokoro English neural TTS (spec approved 2026-11-01;
+   see `Docs/superpowers/specs/2026-11-01-paradee-kokoro-tts-design.md`)
 
 ## Activity Log
+
+### 2026-11-01
+- **Neural TTS (Paradee + Kokoro) — design approved.** Researched Paradee
+  (Kokoro-82M distilled to ~8M params; int8 ONNX 8.5 MB; 4 voices; Apache-2.0)
+  and Kokoro-82M v1.0 (92.4 MB int8 + 28.2 MB style pack; 28 English voices).
+  Both share the same 178-token IPA vocab and 24 kHz output, differing only in
+  the voice input (`voice` int64 for Paradee, `style` float32 row for Kokoro),
+  so one helper serves both behind MDViewer's existing file-then-play pipeline.
+- **G2P feasibility validated on this machine.** Probed the bundled
+  `espeak-ng.dll` against `espeak-ng-data`: it produces IPA
+  (`həlˈoʊ wˈɜːld`, `pɚɹˈeɪdiː`) and links under MinGW via cgo. Confirmed
+  `espeak_TextToPhonemes` returns one clause per call and drops punctuation,
+  so punctuation will be re-attached by pre-splitting clauses. The author's
+  `web/misaki.js` eSpeak→misaki table (Apache-2.0) will be ported to Go.
+- **ORT constraint identified.** Piper bundles ONNX Runtime 1.14.1, which no
+  current `onnxruntime_go` release supports; the plan pins
+  `onnxruntime_go` v1.14.0 with a bundled ORT 1.20.0 (~12 MB).
+- **Scope decided:** Windows/Wails first; Mac reuses the helper later.
+  Kokoro English voices only (28); Paradee as an option, not the default;
+  assets fetched at build time, no runtime downloads.
+- **Spec written:** `Docs/superpowers/specs/2026-11-01-paradee-kokoro-tts-design.md`
+  (architecture, components, assets, testing, phased delivery, risks).
+  No implementation code yet — awaiting spec review before the plan.
 
 ### 2026-10-22
 - **TTS pipeline — next line renders while the current one plays.** Added
@@ -302,4 +327,4 @@ MDViewer/
   new tab instead of reusing the active one.)
 
 ---
-*Last Updated: 2026-10-22*
+*Last Updated: 2026-11-01*
