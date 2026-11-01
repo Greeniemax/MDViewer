@@ -93,6 +93,29 @@ func New(family Family, modelPath, configPath, voicesPath string) (*Engine, erro
 	return e, nil
 }
 
+// ConfigOnly loads just the config (and voice pack) for --list-voices.
+func ConfigOnly(family Family, configPath, voicesPath string) (*Engine, error) {
+	raw, err := os.ReadFile(configPath)
+	if err != nil {
+		return nil, fmt.Errorf("read config: %w", err)
+	}
+	cfg := &Config{SampleRate: 24000}
+	if err := json.Unmarshal(raw, cfg); err != nil {
+		return nil, fmt.Errorf("parse config: %w", err)
+	}
+	e := &Engine{family: family, config: cfg, voiceIndex: map[string]int64{}}
+	for i, v := range cfg.Voices {
+		e.voiceIndex[v] = int64(i)
+	}
+	if family == FamilyKokoro {
+		e.styles, err = npz.Open(voicesPath)
+		if err != nil {
+			return nil, fmt.Errorf("open voices: %w", err)
+		}
+	}
+	return e, nil
+}
+
 // SampleRate returns the model's output rate.
 func (e *Engine) SampleRate() int { return e.config.SampleRate }
 
