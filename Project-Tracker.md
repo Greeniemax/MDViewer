@@ -116,6 +116,13 @@ MDViewer/
   `list-voices`) and exits 1 with "not implemented yet". This is the base for
   the Paradee/Kokoro ONNX renderer invoked per line by MDViewer.
   `go build ./...` and `go vet ./...` pass.
+- **Neural TTS — Task 2 done: eSpeak→misaki mapping ported.** Added the pure
+  package `tools/neural-tts/internal/misaki` (Go port of Paradee's Apache-2.0
+  `web/misaki.js`) with `ToMisaki(ps, british)` and 7 tests covering American
+  diphthongs/rhotics/flap/glottal, British `eə` and `the`-before-vowel,
+  syllabic consonants and word-final syllabic L, and the article "a".
+  Written TDD-first (failed as undefined `ToMisaki`), then implemented: all
+  tests pass, `gofmt -l .` clean, `go vet ./...` clean.
 
 ### 2026-10-22
 - **TTS pipeline — next line renders while the current one plays.** Added
