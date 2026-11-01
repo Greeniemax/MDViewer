@@ -1,7 +1,10 @@
 // Package phonemes turns a line of text into model-ready token IDs.
 package phonemes
 
-import "strings"
+import (
+	"strings"
+	"unicode"
+)
 
 // Clause is one punctuation-terminated segment of a line. Punct is the
 // delimiter that followed it, or 0 for the final clause.
@@ -23,7 +26,7 @@ func Split(text string) []Clause {
 
 	flush := func(p rune) {
 		t := strings.TrimSpace(string(cur))
-		if t != "" {
+		if speakable(t) {
 			out = append(out, Clause{Text: t, Punct: p})
 		}
 		cur = cur[:0]
@@ -40,9 +43,24 @@ func Split(text string) []Clause {
 	return out
 }
 
+// speakable reports whether s contains something espeak can pronounce, so
+// punctuation or quote leftovers after a clause delimiter are not emitted as
+// their own clause.
+func speakable(s string) bool {
+	for _, r := range s {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			return true
+		}
+	}
+	return false
+}
+
 // IDs maps phoneme runes to vocabulary IDs, drops unknown runes, caps the
 // payload at max, and wraps it in the 0 pad token the models expect.
 func IDs(ps string, vocab map[string]int64, max int) []int64 {
+	if max <= 0 {
+		return []int64{0, 0}
+	}
 	ids := make([]int64, 0, len(ps)+2)
 	ids = append(ids, 0)
 	n := 0
@@ -63,6 +81,9 @@ func IDs(ps string, vocab map[string]int64, max int) []int64 {
 // SplitPhonemes cuts a phoneme string into chunks of at most max runes,
 // preferring the last space before the limit. This mirrors Paradee's _chunks.
 func SplitPhonemes(ps string, max int) []string {
+	if max <= 0 {
+		return nil
+	}
 	rs := []rune(ps)
 	var out []string
 	for len(rs) > max {
