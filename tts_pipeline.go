@@ -83,6 +83,10 @@ func (a *App) runPrefetch(key, text, voice string, rate int, entry *prefetchedAu
 // bundled Piper engine and falls back to the OS voice if that fails (unless the
 // failure was caused by the user pressing Stop).
 func (a *App) synthesizeToFile(text, voice string, rate int, entry *prefetchedAudio) (string, error) {
+	// selector is passed to the native engine. Natural-engine selectors are
+	// cleared on failure so SAPI/say fall back to their default voice.
+	selector := voice
+
 	if id, ok := tts.PiperVoiceID(voice); ok {
 		path, err := a.synthesizePiperFile(text, id, rate, entry)
 		if err == nil {
@@ -94,16 +98,25 @@ func (a *App) synthesizeToFile(text, voice string, rate int, entry *prefetchedAu
 		if stopped {
 			return "", err
 		}
-		// Natural engine failed (not a user Stop) — fall back to the native voice.
-		if runtimePkg.GOOS == "windows" {
-			return a.synthesizeWindowsFile(text, "", rate, entry)
+		selector = ""
+	} else if family, id, ok := tts.NeuralVoiceID(voice); ok {
+		path, err := a.synthesizeNeuralFile(family, id, text, rate, entry)
+		if err == nil {
+			return path, nil
 		}
-		return a.synthesizeMacOSFile(text, "", rate, entry)
+		a.ttsMutex.Lock()
+		stopped := a.stopRequested
+		a.ttsMutex.Unlock()
+		if stopped {
+			return "", err
+		}
+		selector = ""
 	}
+
 	if runtimePkg.GOOS == "windows" {
-		return a.synthesizeWindowsFile(text, voice, rate, entry)
+		return a.synthesizeWindowsFile(text, selector, rate, entry)
 	}
-	return a.synthesizeMacOSFile(text, voice, rate, entry)
+	return a.synthesizeMacOSFile(text, selector, rate, entry)
 }
 
 // runTracked starts cmd, records it on the prefetch entry (if any) so Stop can

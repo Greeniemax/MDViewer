@@ -42,12 +42,19 @@ type App struct {
 
 	voicesMu         sync.Mutex
 	voicesRefreshing bool
+
+	neuralMu      sync.Mutex
+	neuralAssets  *neuralAssets
+	neuralVoices  []string
+	neuralLoaded  bool
+	neuralServers map[string]*neuralServer
 }
 
 // NewApp creates a new App application struct
 func NewApp() *App {
 	return &App{
-		prefetch: make(map[string]*prefetchedAudio),
+		prefetch:      make(map[string]*prefetchedAudio),
+		neuralServers: make(map[string]*neuralServer),
 	}
 }
 
@@ -338,12 +345,14 @@ func (a *App) Stop() error {
 	for _, path := range paths {
 		os.Remove(path)
 	}
+	a.stopNeuralServers()
 
 	if runtimePkg.GOOS != "windows" {
 		// Sweep players/synthesizers that may have outlived their parent.
 		exec.Command("pkill", "-f", "afplay").Run()
 		exec.Command("pkill", "-f", "say").Run()
 		exec.Command("pkill", "-f", "piper").Run()
+		exec.Command("pkill", "-f", "neural-tts").Run()
 	}
 	return nil
 }
@@ -376,7 +385,7 @@ func (a *App) GetAvailableVoices() ([]string, error) {
 		}
 	}
 
-	return append(piper, native...), nil
+	return append(append(piper, a.getNeuralVoices()...), native...), nil
 }
 
 func (a *App) queryNativeVoices() ([]string, error) {
@@ -409,7 +418,7 @@ func (a *App) refreshNativeVoicesAsync() {
 		if err := saveNativeVoicesCache(native); err != nil {
 			return
 		}
-		voices := append(a.getPiperVoices(), native...)
+		voices := append(append(a.getPiperVoices(), a.getNeuralVoices()...), native...)
 		runtime.EventsEmit(a.ctx, "voices-updated", voices)
 	}()
 }

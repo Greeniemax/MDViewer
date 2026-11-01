@@ -1451,6 +1451,10 @@ function populateVoices(voices) {
     naturalGroup.label = 'Bundled voices';
     const systemGroup = document.createElement('optgroup');
     systemGroup.label = 'Native voices';
+    const paradeeGroup = document.createElement('optgroup');
+    paradeeGroup.label = 'Paradee';
+    const kokoroGroup = document.createElement('optgroup');
+    kokoroGroup.label = 'Kokoro';
 
     voices.forEach(voice => {
         const option = document.createElement('option');
@@ -1463,6 +1467,10 @@ function populateVoices(voices) {
             option.value = tabParts[0] + '\t' + tabParts[1];
             option.textContent = tabParts[2];
             systemGroup.appendChild(option);
+        } else if (tabParts.length >= 3 && (tabParts[0] === 'paradee' || tabParts[0] === 'kokoro')) {
+            option.value = tabParts[0] + '\t' + tabParts[1];
+            option.textContent = tabParts[2];
+            (tabParts[0] === 'paradee' ? paradeeGroup : kokoroGroup).appendChild(option);
         } else {
             const sepIndex = voice.indexOf('|');
             if (sepIndex > 0) {
@@ -1483,6 +1491,14 @@ function populateVoices(voices) {
     if (naturalGroup.children.length > 0) {
         naturalGroup.label = 'Bundled voices (' + naturalGroup.children.length + ')';
         voiceSelect.appendChild(naturalGroup);
+    }
+    if (paradeeGroup.children.length > 0) {
+        paradeeGroup.label = 'Paradee (' + paradeeGroup.children.length + ')';
+        voiceSelect.appendChild(paradeeGroup);
+    }
+    if (kokoroGroup.children.length > 0) {
+        kokoroGroup.label = 'Kokoro (' + kokoroGroup.children.length + ')';
+        voiceSelect.appendChild(kokoroGroup);
     }
 
     // Keep the user's selection when the background refresh arrives; otherwise
