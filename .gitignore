@@ -44,3 +44,10 @@ wails_*_temp.txt
 resources/piper/engine/
 resources/piper/voices/
 
+
+# Neural TTS assets (fetched by scripts/fetch-neural.ps1)
+resources/neural/*.onnx
+resources/neural/*.bin
+resources/neural/*.dll
+resources/neural/*.exe
+resources/neural/*.wav
