@@ -33,6 +33,9 @@ type options struct {
 	espeakData string
 	outPath    string
 	listVoices bool
+	serve      bool
+	in         io.Reader
+	out        io.Writer
 }
 
 func main() {
@@ -49,7 +52,10 @@ func main() {
 	flag.StringVar(&o.espeakData, "espeak-data", "", "path to espeak-ng-data")
 	flag.StringVar(&o.outPath, "out", "", "output WAV path")
 	flag.BoolVar(&o.listVoices, "list-voices", false, "print voices and exit")
+	flag.BoolVar(&o.serve, "serve", false, "keep the model loaded and serve JSON lines on stdin")
 	flag.Parse()
+	o.in = os.Stdin
+	o.out = os.Stdout
 
 	if err := run(o); err != nil {
 		fmt.Fprintln(os.Stderr, "neural-tts:", err)
@@ -68,6 +74,9 @@ func run(o options) error {
 
 	if o.listVoices {
 		return listVoices(family, o.configPath, o.voicesPath)
+	}
+	if o.serve {
+		return runServe(o)
 	}
 	if o.modelPath == "" || o.voice == "" || o.outPath == "" {
 		return fmt.Errorf("--model, --voice, and --out are required")
