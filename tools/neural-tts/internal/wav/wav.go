@@ -35,7 +35,7 @@ func Write(path string, samples []float32, rate int) error {
 		} else if s < -1 {
 			s = -1
 		}
-		v := int16(math.Round(float64(s) * 32767))
+		v := int16(s * 32767)
 		binary.LittleEndian.PutUint16(buf[44+i*2:46+i*2], uint16(v))
 	}
 	return os.WriteFile(path, buf, 0o644)
