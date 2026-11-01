@@ -131,6 +131,14 @@ MDViewer/
   Added tests for Unicode boundaries, the replacement table, order-sensitive
   pairs (no doubled rhotic, `əʊ`→`Q`, syllabic before open-A, article a/an),
   and consecutive marks: 11 tests pass, `gofmt -l .` and `go vet ./...` clean.
+- **Neural TTS — Task 3 done: clause splitting, token IDs, chunking.** Added
+  the pure package `tools/neural-tts/internal/phonemes` with `Split` (splits at
+  clause punctuation, keeps the delimiter so it can be re-attached since espeak
+  drops it), `IDs` (maps phoneme runes to vocab IDs, drops unknown runes, caps
+  at max, wraps in 0 pad tokens), and `SplitPhonemes` (chunks long phoneme
+  strings at spaces, hard-cutting when no space exists). Written TDD-first
+  (failed as undefined), then implemented: 6 tests pass, `gofmt -l .` and
+  `go vet ./...` clean.
 
 ### 2026-10-22
 - **TTS pipeline — next line renders while the current one plays.** Added
