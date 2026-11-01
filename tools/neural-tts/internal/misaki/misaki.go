@@ -30,6 +30,19 @@ var replacements = []struct{ from, to string }{
 
 // ToMisaki normalizes one eSpeak phoneme string. british selects the rules for
 // the bf_/bm_ voices.
+//
+// Replacement order is load-bearing:
+//   - British "eə" to "ɛː" runs before the generic "e" to "A", and "eɪ" to "A"
+//     likewise precedes "e" to "A".
+//   - "ʲo"/"ʲə" run before bare "ʲ", which is then dropped.
+//   - "ɜːɹ" runs before "ɜː" (and "ɜː" before the generic "ː" strip), so the
+//     rhotic is not doubled.
+//   - British "əʊ" to "Q" and American "oʊ" to "O" run before the final
+//     "o" to "ɔ" pass that would otherwise rewrite them.
+//   - The syllabic-consonant and article/open-A rewrites run before the
+//     British/American passes that would otherwise touch their output.
+//
+// ("ʔˌn̩" being listed before "ʔn̩" is coincidental; "ʔn̩" matches on its own.)
 func ToMisaki(ps string, british bool) string {
 	if british {
 		ps = strings.ReplaceAll(ps, "eə", "ɛː")
@@ -57,17 +70,19 @@ func ToMisaki(ps string, british bool) string {
 	return strings.ReplaceAll(ps, "ʔ", "t")
 }
 
-func isBoundary(r rune) bool { return strings.ContainsRune(boundary, r) }
+// isBoundary reports whether r ends a word. It matches JavaScript's whitespace
+// class, including U+FEFF, which unicode.IsSpace does not consider white space.
+func isBoundary(r rune) bool {
+	return unicode.IsSpace(r) || r == 0xFEFF || strings.ContainsRune(boundary, r)
+}
 
 // syllabicConsonants turns "n̩" into "ᵊn" (the misaki spelling of a syllabic
-// consonant) and drops any leftover combining vertical line.
+// consonant). Pair detection runs first so consecutive marks ("̩̩") pair up as
+// the JavaScript does, then any leftover combining vertical line is dropped.
 func syllabicConsonants(ps string) string {
 	rs := []rune(ps)
 	var b strings.Builder
 	for i := 0; i < len(rs); i++ {
-		if rs[i] == '̩' {
-			continue
-		}
 		if i+1 < len(rs) && rs[i+1] == '̩' && !unicode.IsSpace(rs[i]) {
 			b.WriteRune('ᵊ')
 			b.WriteRune(rs[i])
@@ -76,7 +91,7 @@ func syllabicConsonants(ps string) string {
 		}
 		b.WriteRune(rs[i])
 	}
-	return b.String()
+	return strings.ReplaceAll(b.String(), "̩", "")
 }
 
 // finalSyllabicL rewrites word-final "əl" as "ᵊl" (naval → nˈAvᵊl).
@@ -124,12 +139,9 @@ func theBeforeVowel(ps string) string {
 	var b strings.Builder
 	for i := 0; i < len(rs); i++ {
 		if i+1 < len(rs) && rs[i] == 'ð' && rs[i+1] == 'ɪ' {
-			beforeOK := i == 0 || unicode.IsSpace(rs[i-1])
-			after := rune(0)
-			if i+2 < len(rs) {
-				after = rs[i+2]
-			}
-			afterOK := after == 0 || unicode.IsSpace(after)
+			beforeOK := i == 0 || isBoundary(rs[i-1])
+			hasAfter := i+2 < len(rs)
+			afterOK := !hasAfter || isBoundary(rs[i+2])
 			if beforeOK && afterOK {
 				b.WriteString("ði")
 				i++

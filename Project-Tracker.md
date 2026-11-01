@@ -123,6 +123,14 @@ MDViewer/
   syllabic consonants and word-final syllabic L, and the article "a".
   Written TDD-first (failed as undefined `ToMisaki`), then implemented: all
   tests pass, `gofmt -l .` clean, `go vet ./...` clean.
+- **Neural TTS — Task 2 review fixes.** `isBoundary` now matches upstream JS
+  whitespace (Unicode space + U+FEFF + punctuation) and is reused by
+  `theBeforeVowel`; consecutive combining marks pair before leftover marks are
+  stripped, matching upstream (`̩̩` → `ᵊ`); the NUL sentinel became an explicit
+  `hasAfter` flag; the order comment names the load-bearing replacements.
+  Added tests for Unicode boundaries, the replacement table, order-sensitive
+  pairs (no doubled rhotic, `əʊ`→`Q`, syllabic before open-A, article a/an),
+  and consecutive marks: 11 tests pass, `gofmt -l .` and `go vet ./...` clean.
 
 ### 2026-10-22
 - **TTS pipeline — next line renders while the current one plays.** Added
