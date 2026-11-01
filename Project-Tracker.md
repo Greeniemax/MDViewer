@@ -101,7 +101,13 @@ MDViewer/
   assets fetched at build time, no runtime downloads.
 - **Spec written:** `Docs/superpowers/specs/2026-11-01-paradee-kokoro-tts-design.md`
   (architecture, components, assets, testing, phased delivery, risks).
-  No implementation code yet — awaiting spec review before the plan.
+- **Spec approved; implementation plan written:**
+  `Docs/superpowers/plans/2026-11-01-paradee-kokoro-tts.md`. 17 tasks with
+  exact code and commands: helper module (misaki port, phonemes, NPZ reader,
+  WAV, espeak binding, ORT engine), app integration, dropdown groups,
+  fetch/build scripts, docs, and a Phase 0 go/no-go listening checkpoint.
+  Pinned asset hashes recorded (Paradee, Kokoro, voices pack, ORT 1.20).
+  No implementation code yet.
 
 ### 2026-10-22
 - **TTS pipeline — next line renders while the current one plays.** Added

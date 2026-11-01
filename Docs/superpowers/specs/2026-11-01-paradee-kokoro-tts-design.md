@@ -381,7 +381,7 @@ Phase 3 is out of scope until phases 1–2 are verified.
 | ORT / Go binding version coupling | Pin `onnxruntime_go` v1.14.0 + ORT 1.20.0; both bundled together; spike verifies session creation |
 | cgo on Windows requires MinGW | `build.bat` checks `gcc` and explains the fix; release builds use this machine's MinGW |
 | cgo pointer loop for espeak | C path validated; Go loop corrected with a `*C.char` pointer; covered by an integration test |
-| espeak→misaki accuracy | Author measures ~2% WER with this conversion; accepted, verified by listening |
+| espeak→misaki accuracy | The mapping's own comment measures ~3% word error after conversion (31% with raw eSpeak phonemes); accepted, verified by listening |
 | Kokoro cold start | Measurement gate in §8; `--serve` fallback designed |
 | Kokoro style-row indexing | Follow reference `min(len(tokens), rows)-1`; verify in spike |
 | 121 MB of existing Piper voices + ~121 MB neural assets | Build-time fetch, gitignored; users with limited disk can skip `fetch-neural` and simply won't see the voices |
