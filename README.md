@@ -49,6 +49,15 @@ keyboard shortcuts.
 - Visual line highlighting during speech
 - Stop/Start controls
 
+#### Neural voices (optional)
+
+With `scripts/fetch-neural.ps1` run at build time, an offline **Paradee** voice
+set (4 voices, 8.5 MB) appears in the dropdown. Kokoro (28 English voices) is
+available with `-All`/`MDVIEWER_NEURAL_KOKORO=1`, but is hidden by default
+because it renders far below real time on modest CPUs. Both run through ONNX
+Runtime and reuse the same prefetch/Stop pipeline as Piper. See
+`Docs/NEURAL_TTS.md`.
+
 ### 📕 Convert to PDF
 - One-click **Convert to PDF** button in both the Windows and macOS apps
 - Converts the whole current document, including unsaved edits, to a PDF

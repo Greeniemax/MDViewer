@@ -75,8 +75,12 @@ MDViewer/
 5. macOS TTS optimization
 6. ~~Verify the native Mac app build on macOS~~ — verified: builds and runs on
    macOS 26.6 with Command Line Tools only
-7. Implement Paradee + Kokoro English neural TTS (spec approved 2026-11-01;
-   see `Docs/superpowers/specs/2026-11-01-paradee-kokoro-tts-design.md`)
+7. ~~Implement Paradee + Kokoro English neural TTS (spec approved 2026-11-01;
+   see `Docs/superpowers/specs/2026-11-01-paradee-kokoro-tts-design.md`)~~ —
+   implemented via the persistent helper; Paradee is listed, Kokoro is opt-in
+   (`MDVIEWER_NEURAL_KOKORO=1`). See `Docs/NEURAL_TTS.md`.
+8. Manual GUI acceptance of neural TTS (plan Task 16, step 4).
+9. macOS neural TTS (plan Task 17, deferred).
 
 ## Activity Log
 
@@ -139,6 +143,43 @@ MDViewer/
   strings at spaces, hard-cutting when no space exists). Written TDD-first
   (failed as undefined), then implemented: 6 tests pass, `gofmt -l .` and
   `go vet ./...` clean.
+
+- **Neural TTS — Task 3 edge cases fixed.** The previous session left extra
+  `phonemes` tests mid-RED. `Split` now drops punctuation/quote leftovers after
+  a clause delimiter, and `IDs`/`SplitPhonemes` treat `max <= 0` as pad-only;
+  the latter previously looped forever (the cause of a hung `go test`). 12 new
+  edge-case tests pass; `gofmt`/`go vet` clean.
+- **Neural TTS — Tasks 4–8 done.** Added `internal/npz` (Kokoro voice-style
+  NPZ reader), `internal/wav` (24 kHz mono 16-bit writer; samples truncate, not
+  round), `internal/espeak` (runtime DLL binding; the C string is copied through
+  a tiny cgo helper so `go vet` stays clean), `internal/models` (one ONNX
+  adapter for Paradee's `voice` index and Kokoro's `style` row), and the full
+  CLI (`--serve`, `--list-voices`, one-shot stdin render). Integration tests
+  against the real models pass for both families.
+- **Neural assets fetched and pinned.** Paradee 1.2, Kokoro v1.0 int8, the
+  28-voice style pack, and ONNX Runtime 1.20.0 all match the plan's SHA-256s.
+  Configs are committed; binaries are gitignored.
+- **Spike + go/no-go.** Rendered `spike-paradee.wav` and `spike-kokoro.wav`;
+  both contain real audio and the user confirmed both are intelligible.
+- **Measured performance changed the architecture.** Paradee renders in
+  ~0.1–0.2 s/line after a ~2 s warmup. Kokoro takes 6–21 s/line (0.2x real
+  time) on this 4-core i5-11300H even with the model preloaded, so per-line
+  process spawn was not the only bottleneck. Decided with the user: expose
+  Paradee; keep Kokoro code/assets behind `MDVIEWER_NEURAL_KOKORO=1`.
+- **Persistent helper instead of spawn-per-line.** The helper now supports
+  `--serve`: newline-delimited JSON in/out with espeak, ORT, and the model
+  loaded once. `tts_neural.go` keeps one server per family, prefetches through
+  it, and kills it on Stop. App test `TestNeuralParadeeRendersViaServer`
+  renders two lines through the bundled helper. Dropdown groups were added;
+  Paradee is listed, Kokoro only when enabled.
+- **Build integration.** `scripts/fetch-neural.ps1` (Paradee + ORT by default,
+  `-All` for Kokoro; uses .NET SHA-256 because `Get-FileHash` is missing in
+  this environment) and `build.bat` now build the cgo helper and bundle
+  `build/bin/neural/`. `build.bat` completed and the bundled helper listed its
+  four Paradee voices and rendered a WAV. Docs: `Docs/NEURAL_TTS.md`, README.
+- **Still to do:** launch `build\bin\MDViewer.exe` and confirm the dropdown,
+  speech, prefetch, and Stop in the GUI (plan Task 16 manual acceptance), then
+  push. macOS neural support remains deferred (Task 17).
 
 ### 2026-10-22
 - **TTS pipeline — next line renders while the current one plays.** Added
