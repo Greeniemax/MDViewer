@@ -86,3 +86,43 @@ func VoiceLabel(configJSON []byte, modelKey string) string {
 	}
 	return name + " (Natural)"
 }
+
+const (
+	paradeePrefix = "paradee\t"
+	kokoroPrefix  = "kokoro\t"
+)
+
+// NeuralVoiceID splits a Paradee or Kokoro selector.
+func NeuralVoiceID(voice string) (family, id string, ok bool) {
+	switch {
+	case strings.HasPrefix(voice, paradeePrefix):
+		return "paradee", strings.TrimPrefix(voice, paradeePrefix), true
+	case strings.HasPrefix(voice, kokoroPrefix):
+		return "kokoro", strings.TrimPrefix(voice, kokoroPrefix), true
+	}
+	return "", "", false
+}
+
+// NeuralSpeed maps the UI rate (100-250 WPM) to the models' speed input,
+// where 1.0 is normal and values are clamped to [0.5, 2.0] (Kokoro's range).
+func NeuralSpeed(rate int) float64 {
+	if rate <= 0 {
+		return 1.0
+	}
+	s := float64(rate) / 175.0
+	if s < 0.5 {
+		return 0.5
+	}
+	if s > 2.0 {
+		return 2.0
+	}
+	return s
+}
+
+// NeuralBinaryName returns the helper filename for the given GOOS.
+func NeuralBinaryName(goos string) string {
+	if goos == "windows" {
+		return "neural-tts.exe"
+	}
+	return "neural-tts"
+}

@@ -11,11 +11,11 @@ func TestLengthScale(t *testing.T) {
 		rate int
 		want float64
 	}{
-		{175, 1.0},     // natural pace
-		{350, 0.5},     // clamped fast
-		{50, 2.0},      // clamped slow (175/50=3.5 -> 2.0)
-		{0, 1.0},       // guard against divide-by-zero
-		{-10, 1.0},     // guard against negative
+		{175, 1.0}, // natural pace
+		{350, 0.5}, // clamped fast
+		{50, 2.0},  // clamped slow (175/50=3.5 -> 2.0)
+		{0, 1.0},   // guard against divide-by-zero
+		{-10, 1.0}, // guard against negative
 	}
 	for _, c := range cases {
 		if got := LengthScale(c.rate); got != c.want {
@@ -75,5 +75,37 @@ func TestVoiceLabel(t *testing.T) {
 	}
 	if got := VoiceLabel([]byte("not json"), "en_US-ryan-medium"); !strings.Contains(got, "Natural") {
 		t.Errorf("VoiceLabel fallback should contain 'Natural', got %q", got)
+	}
+}
+
+func TestNeuralVoiceID(t *testing.T) {
+	family, id, ok := NeuralVoiceID("paradee\taf_heart")
+	if !ok || family != "paradee" || id != "af_heart" {
+		t.Fatalf("got %q %q %v", family, id, ok)
+	}
+	family, id, ok = NeuralVoiceID("kokoro\tbf_isabella")
+	if !ok || family != "kokoro" || id != "bf_isabella" {
+		t.Fatalf("got %q %q %v", family, id, ok)
+	}
+	if _, _, ok := NeuralVoiceID("piper\ten_US-amy-medium"); ok {
+		t.Fatal("piper selector must not match")
+	}
+	if _, _, ok := NeuralVoiceID("default"); ok {
+		t.Fatal("plain selector must not match")
+	}
+}
+
+func TestNeuralSpeed(t *testing.T) {
+	if got := NeuralSpeed(175); got != 1.0 {
+		t.Fatalf("175 WPM = %v, want 1.0", got)
+	}
+	if got := NeuralSpeed(250); got < 1.4 || got > 1.5 {
+		t.Fatalf("250 WPM = %v", got)
+	}
+	if got := NeuralSpeed(50); got != 0.5 {
+		t.Fatalf("clamp low = %v", got)
+	}
+	if got := NeuralSpeed(500); got != 2.0 {
+		t.Fatalf("clamp high = %v", got)
 	}
 }
