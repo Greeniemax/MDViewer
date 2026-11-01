@@ -71,6 +71,39 @@ copy /Y "%~dp0resources\piper\voices\*.onnx" "%PIPER_OUT%\voices\" >nul
 copy /Y "%~dp0resources\piper\voices\*.onnx.json" "%PIPER_OUT%\voices\" >nul
 echo Piper bundled at %PIPER_OUT%
 
+echo Building neural TTS helper...
+where gcc >nul 2>&1
+if errorlevel 1 (
+    echo [ERROR] gcc is required to build the neural TTS helper ^(MinGW^).
+    exit /b 1
+)
+powershell -ExecutionPolicy Bypass -File "%~dp0scripts\fetch-neural.ps1"
+if errorlevel 1 (
+    echo [ERROR] Neural asset fetch failed.
+    exit /b 1
+)
+set "NEURAL_OUT=%~dp0build\bin\neural"
+if not exist "%NEURAL_OUT%" mkdir "%NEURAL_OUT%"
+pushd "%~dp0tools\neural-tts"
+set CGO_ENABLED=1
+go build -o "%NEURAL_OUT%\neural-tts.exe" .
+if errorlevel 1 (
+    popd
+    echo [ERROR] neural-tts build failed.
+    exit /b 1
+)
+popd
+copy /Y "%~dp0resources\neural\paradee_int8.onnx" "%NEURAL_OUT%\" >nul
+copy /Y "%~dp0resources\neural\paradee-config.json" "%NEURAL_OUT%\" >nul
+copy /Y "%~dp0resources\neural\onnxruntime.dll" "%NEURAL_OUT%\" >nul
+copy /Y "%~dp0resources\neural\espeak-ng.dll" "%NEURAL_OUT%\" >nul
+if "%MDVIEWER_NEURAL_KOKORO%"=="1" (
+    copy /Y "%~dp0resources\neural\kokoro-v1.0.int8.onnx" "%NEURAL_OUT%\" >nul
+    copy /Y "%~dp0resources\neural\voices-v1.0.bin" "%NEURAL_OUT%\" >nul
+)
+copy /Y "%~dp0resources\neural\kokoro-config.json" "%NEURAL_OUT%\" >nul
+echo Neural TTS bundled at %NEURAL_OUT%
+
 echo.
 echo OK:  %~dp0build\bin\MDViewer.exe
 endlocal
