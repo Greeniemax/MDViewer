@@ -108,6 +108,14 @@ MDViewer/
   fetch/build scripts, docs, and a Phase 0 go/no-go listening checkpoint.
   Pinned asset hashes recorded (Paradee, Kokoro, voices pack, ORT 1.20).
   No implementation code yet.
+- **Neural TTS — Task 1 done: helper module scaffolded.** Created the separate
+  Go module at `tools/neural-tts` (`go.mod` pinned to `go 1.23`, module path
+  `github.com/Greeniemax/MDViewer/tools/neural-tts`) with a `main.go` CLI stub
+  that defines the full flag surface (`family`, `model`, `config`, `voices`,
+  `voice`, `speed`, `lang`, `ort`, `espeak-dll`, `espeak-data`, `out`,
+  `list-voices`) and exits 1 with "not implemented yet". This is the base for
+  the Paradee/Kokoro ONNX renderer invoked per line by MDViewer.
+  `go build ./...` and `go vet ./...` pass.
 
 ### 2026-10-22
 - **TTS pipeline — next line renders while the current one plays.** Added
