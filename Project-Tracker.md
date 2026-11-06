@@ -9,6 +9,7 @@
 - Text-to-Speech — Native TTS:
   - **macOS:** `AVSpeechSynthesizer` (WAV) + `afplay`; Enhanced/Premium voices supported
   - **Windows:** Windows Speech API (SAPI) via PowerShell
+  - **Both:** bundled Piper (VITS) and optional Paradee 1.2 / Kokoro-82M neural voices through one ONNX Runtime helper
 - Click-to-Select — Click word in viewer to set reading position
 - Voice Controls — Multiple voices with adjustable rate (100-250 WPM)
 - Visual Highlighting — Line highlighting during TTS with animated pulse
@@ -21,7 +22,7 @@
 | Framework | Wails v2.11.0 |
 | Frontend | Vanilla JavaScript, HTML5, CSS3 |
 | Build Tool | Vite |
-| TTS Backend | macOS: AVSpeechSynthesizer/`afplay`, Windows: SAPI/OneCore via PowerShell |
+| TTS Backend | macOS: AVSpeechSynthesizer/`afplay`, Windows: SAPI/OneCore via PowerShell; shared `tools/neural-tts` helper for Piper/Paradee/Kokoro |
 | Native macOS app | Swift 5.9, SwiftUI + AppKit, Swift Package Manager |
 | PDF export | Windows: Edge/Chrome headless `--print-to-pdf`; macOS: AppKit `NSPrintOperation` |
 
@@ -51,9 +52,13 @@ MDViewer/
 ├── Mac/                      # Native macOS Swift port (SwiftPM + AppKit/SwiftUI)
 │   ├── Sources/MDViewer/     # app, editor, viewer, markdown parser, TTS engine
 │   ├── Sources/MDViewer/PDFExport.swift  # markdown -> attributed string -> PDF
-│   ├── build.sh              # builds MDViewer.app, bundles Piper, ad-hoc signs
+│   ├── Sources/MDViewer/NeuralEngine.swift  # Paradee/Kokoro helper client
+│   ├── build.sh              # builds MDViewer.app, bundles Piper + neural, ad-hoc signs
 │   ├── register.sh           # installs to /Applications, default .md handler
 │   └── README.md             # macOS build/run instructions
+├── tools/neural-tts/         # Go ONNX helper (Paradee/Kokoro, serve mode)
+├── scripts/fetch-neural.sh   # macOS neural assets (model + ORT + espeak links)
+├── resources/neural/         # fetched model/config/ORT (gitignored assets)
 ├── build/                    # Build output
 └── README.md
 ```
@@ -80,9 +85,64 @@ MDViewer/
    implemented via the persistent helper; Paradee is listed, Kokoro is opt-in
    (`MDVIEWER_NEURAL_KOKORO=1`). See `Docs/NEURAL_TTS.md`.
 8. Manual GUI acceptance of neural TTS (plan Task 16, step 4).
-9. macOS neural TTS (plan Task 17, deferred).
+9. ~~macOS neural TTS (plan Task 17, deferred)~~ — implemented: `neural-tts`
+   built for macOS, `NeuralEngine.swift` client, picker group, `fetch-neural.sh`,
+   and bundling in `Mac/build.sh`; verified end-to-end on macOS 26.6
+   (one warm helper, continuous playback, instant Stop).
 
 ## Activity Log
+
+### 2026-11-06
+- **Paradee neural TTS on macOS.** Ported the Windows neural helper to the native
+  Mac app; the two platforms now share `tools/neural-tts` (Go + cgo + ONNX
+  Runtime) and differ only in how espeak and the assets are bundled.
+  - **espeak on macOS:** new `espeak_darwin.go` loads the Piper-bundled
+    `libespeak-ng.1.dylib` with `dlopen` at runtime (no build-time dependency),
+    calls `espeak_Initialize`/`SetVoiceByName`/`TextToPhonemes` through C
+    bridges, and reuses the existing `espeak-ng-data`. The Piper data set has no
+    `en-gb` voice entry, so British English maps to `en-gb-x-rp` (verified IPA
+    output); American English uses `en-us`.
+  - **Architecture:** the upstream Piper macOS release ships x86_64 binaries
+    even in its `aarch64` tarball, and espeak must match the helper. The helper
+    is therefore built for x86_64 on Apple Silicon (Rosetta, same as Piper) and
+    natively on Intel. `scripts/fetch-neural.sh` inspects the dylib and picks
+    the matching ONNX Runtime 1.20.0 build (arm64 or x86_64), so a future native
+    Piper bundle switches to arm64 with no code change. `Mac/build.sh` derives
+    `GOARCH` the same way.
+  - **Assets:** new `scripts/fetch-neural.sh` pins the Paradee model hash
+    (`a69897…`), downloads ORT 1.20.0, and symlinks `libespeak-ng*.dylib` and
+    `espeak-ng-data` from the Piper bundle. `Mac/build.sh` rebuilds the helper
+    and bundles `Contents/Resources/neural` (helper, model, config, ORT,
+    espeak dylibs, data symlink); Kokoro is bundled only when its assets exist.
+  - **Mac app:** `NeuralEngine.swift` adds a persistent `neural-tts --serve`
+    client (newline-delimited JSON, one request at a time, serialized server
+    creation so only one model load happens) and a voice-list reader.
+    `VoiceOption` gains `paradee`/`kokoro` kinds plus `neuralVoice`;
+    `VoiceCatalog.refresh()` inserts the neural voices between system and Piper;
+    `SpeechEngine` renders neural lines with the same prefetch pipeline and
+    falls back to the default system voice on failure; Stop kills the helper and
+    player immediately. The picker shows a "Neural voices (N)" section. The
+    Enhanced/Premium auto-upgrade no longer overrides an explicitly selected
+    neural or Piper voice.
+  - **Fixed a pipe bug:** `FileHandle.read(upToCount:)` blocks on the helper's
+    stdout pipe; the client uses `availableData` instead, which returns the
+    JSON reply as soon as the helper flushes it.
+  - **Verified on macOS 26.6 (Command Line Tools only):** helper lists the four
+    Paradee voices; renders 24 kHz mono WAVs (`{"ok":true}`); packaged app shows
+    `Paradee · Heart/Isabella/Puck/Fable`, keeps exactly one warm helper while
+    reading, prefetches the next line, and Stop removes both the helper and
+    `afplay` within a second. `go test ./...` in `tools/neural-tts` passes on
+    darwin (x86_64).
+  - Docs updated: `Docs/NEURAL_TTS.md`, `Mac/README.md`, `README.md`.
+  - **Skip button (macOS).** Added a **Skip** control between Speak and Stop
+    (menu: **Speech → Skip to Next Paragraph**, `⌥⌘→`). `SpeechEngine.skip()`
+    bumps a per-line token and kills only the active `afplay`, so the current
+    paragraph is dropped whether it is still rendering or already playing,
+    while the reading session, prefetch queue and warm neural helper stay
+    alive. `speakOne`/`play` compare the token and throw `.skipped`, which the
+    loop treats as "continue with the next paragraph" with no error log.
+    Verified repeated skips advance one paragraph each time, the helper stays
+    warm, and Stop still tears everything down.
 
 ### 2026-11-01
 - **Neural TTS (Paradee + Kokoro) — design approved.** Researched Paradee
@@ -405,4 +465,4 @@ MDViewer/
   new tab instead of reusing the active one.)
 
 ---
-*Last Updated: 2026-11-01*
+*Last Updated: 2026-11-06*

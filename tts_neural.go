@@ -101,7 +101,17 @@ func (a *App) resolveNeural() *neuralAssets {
 			dir:        abs,
 			exe:        exePath,
 			ort:        ortPath,
-			espeakDLL:  firstExisting(filepath.Join(abs, "espeak-ng.dll"), filepath.Join(abs, "espeak-ng")),
+			espeakDLL: firstExisting(
+				filepath.Join(abs, "espeak-ng.dll"),
+				filepath.Join(abs, "libespeak-ng.1.dylib"),
+				filepath.Join(abs, "libespeak-ng.dylib"),
+				filepath.Join(abs, "..", "piper", "libespeak-ng.1.dylib"),
+				filepath.Join(abs, "..", "piper", "libespeak-ng.dylib"),
+				filepath.Join(abs, "espeak-ng"),
+			),
+			// espeak_Initialize wants a directory it can find espeak-ng-data in.
+			// The darwin binding accepts either the data directory or its
+			// parent; Windows receives the data directory itself.
 			espeakData: firstExisting(
 				filepath.Join(abs, "espeak-ng-data"),
 				filepath.Join(abs, "..", "piper", "espeak-ng-data"),

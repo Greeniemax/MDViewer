@@ -167,6 +167,7 @@ struct ContentView: View {
     private var speechControls: some View {
         let natural = model.voiceOptions.filter { $0.kind == .piper }
         let system = model.voiceOptions.filter { $0.kind == .system }
+        let neural = model.voiceOptions.filter { $0.kind == .paradee || $0.kind == .kokoro }
 
         Picker("Voice", selection: $model.selectedVoiceID) {
             if model.voiceOptions.isEmpty {
@@ -175,6 +176,13 @@ struct ContentView: View {
                 if !system.isEmpty {
                     Section("macOS voices (\(system.count))") {
                         ForEach(system) { voice in
+                            Text(voice.label).tag(voice.id)
+                        }
+                    }
+                }
+                if !neural.isEmpty {
+                    Section("Neural voices (\(neural.count))") {
+                        ForEach(neural) { voice in
                             Text(voice.label).tag(voice.id)
                         }
                     }
@@ -216,6 +224,14 @@ struct ContentView: View {
         }
         .buttonStyle(MDButtonStyle(color: Theme.green, compact: true))
         .disabled(model.isSpeaking || model.activeText.isEmpty)
+
+        Button {
+            model.skipSpeakingLine()
+        } label: {
+            Label("Skip", systemImage: "forward.end.fill")
+        }
+        .buttonStyle(MDButtonStyle(color: Theme.accent, compact: true))
+        .disabled(!model.isSpeaking)
 
         Button {
             model.stopSpeaking()

@@ -474,8 +474,9 @@ final class AppModel: ObservableObject {
             }
         }
 
-        // A downloaded natural macOS voice (Enhanced/Premium) always wins over
-        // the bundled or compact voices.
+        // A downloaded natural macOS voice (Enhanced/Premium) upgrades a
+        // compact system voice, but never overrides an explicitly chosen
+        // neural (Paradee/Kokoro) or bundled Piper voice.
         if let bestNative = voices
             .filter({ $0.kind == .system && $0.quality >= 2 })
             .max(by: { a, b in
@@ -483,6 +484,7 @@ final class AppModel: ObservableObject {
                 return a.label > b.label
             }),
            let current = voices.first(where: { $0.id == selectedVoiceID }),
+           current.kind == .system,
            current.quality < bestNative.quality {
             selectedVoiceID = bestNative.id
         }
@@ -559,6 +561,13 @@ final class AppModel: ObservableObject {
         isSpeaking = false
         readingStatus = ""
         highlightedLine = nil
+    }
+
+    /// Skips the paragraph currently being read and continues with the next
+    /// one without ending the reading session.
+    func skipSpeakingLine() {
+        guard isSpeaking else { return }
+        speech.skip()
     }
 
     func cleanMarkdownForSpeech(_ input: String) -> String {

@@ -51,3 +51,5 @@ resources/neural/*.bin
 resources/neural/*.dll
 resources/neural/*.exe
 resources/neural/*.wav
+resources/neural/neural-tts
+resources/neural/espeak-ng-data

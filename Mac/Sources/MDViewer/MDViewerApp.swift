@@ -121,6 +121,12 @@ struct AppCommands: Commands {
             .keyboardShortcut(.return, modifiers: .command)
             .disabled(model.isSpeaking || model.activeText.isEmpty)
 
+            Button("Skip to Next Paragraph") {
+                model.skipSpeakingLine()
+            }
+            .keyboardShortcut(.rightArrow, modifiers: [.command, .option])
+            .disabled(!model.isSpeaking)
+
             Button("Stop") {
                 model.stopSpeaking()
             }

@@ -31,9 +31,9 @@ enum VoiceCatalog {
     }
 
     static func refresh() -> [VoiceOption] {
-        // macOS system voices first; the two bundled models are a fallback at
-        // the bottom of the picker.
-        systemVoices() + piperVoices()
+        // macOS system voices first, then the neural models, and the two
+        // bundled Piper models last as the offline fallback.
+        systemVoices() + NeuralVoiceCatalog.voices() + piperVoices()
     }
 
     static func defaultVoice(from voices: [VoiceOption]) -> VoiceOption? {

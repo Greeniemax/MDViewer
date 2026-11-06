@@ -57,7 +57,7 @@ To undo, select another app in Finder: right-click a `.md` file → **Get Info**
 
 ## Natural voices
 
-There are two ways to get natural-sounding speech on macOS.
+There are three ways to get natural-sounding speech on macOS.
 
 ### 1. Apple's Enhanced / Premium voices (native, best option)
 
@@ -107,7 +107,43 @@ You can also point the app at an existing Piper folder at runtime:
 MDVIEWER_PIPER_DIR=/path/to/piper open build/MDViewer.app
 ```
 
-The folder must contain the `piper` executable and a `voices/` subdirectory.
+The folder must contain the `piper` executable and a `voices/` directory.
+
+### 3. Paradee neural voices (optional, offline)
+
+**Paradee 1.2** is a compact (8.5 MB) distilled neural model with four English
+voices (Heart, Isabella, Puck, Fable). It sounds markedly more natural than the
+compact system voices and renders a line in a fraction of a second. Fetch the
+model, ONNX Runtime, and the Piper-bundled espeak-ng assets:
+
+```bash
+bash scripts/fetch-piper.sh    # provides espeak-ng dylib + data
+bash scripts/fetch-neural.sh   # Paradee model + ONNX Runtime 1.20
+cd Mac && bash build.sh
+```
+
+The voices appear under **Neural voices (4)** in the picker. The helper loads
+the model once per reading session, so the first line takes ~2 s and the rest
+stream without gaps; Stop kills it immediately.
+
+Details:
+
+- The helper is `neural-tts --serve` (Go + cgo + ONNX Runtime), bundled into
+  `MDViewer.app/Contents/Resources/neural`.
+- It reuses the espeak-ng dylib and data set that already ship with Piper, so
+  the download is small and the app keeps working offline.
+- Upstream Piper's macOS bundle is x86_64 even on Apple Silicon, so the helper
+  is built for x86_64 and runs under Rosetta. `scripts/fetch-neural.sh` picks
+  the matching ONNX Runtime automatically.
+- **Kokoro-82M** (28 English voices) is supported by the same helper but hidden
+  by default because it is much slower. Opt in with
+  `bash scripts/fetch-neural.sh --all` and launch the app with
+  `MDVIEWER_NEURAL_KOKORO=1`.
+- Without the assets the neural group simply does not appear and the app falls
+  back to the system/Piper voices.
+
+See [../Docs/NEURAL_TTS.md](../Docs/NEURAL_TTS.md) for the full architecture,
+manual test recipe, and licenses.
 
 ## Features
 
@@ -122,14 +158,15 @@ The folder must contain the `piper` executable and a `voices/` subdirectory.
 - **Instant Stop** — kills the active player and any in-flight synthesizer
   immediately, and discards queued audio files.
 - **Native voices** — macOS `AVSpeechSynthesizer`/`afplay` (WAV), including
-  downloaded Enhanced/Premium voices, plus bundled Piper (WAV).
+  downloaded Enhanced/Premium voices, plus bundled Piper (WAV) and optional
+  offline **Paradee** neural voices.
 - **Voice controls** — the picker lists a short English-only set of the voices
   actually installed on the Mac (via `AVSpeechSynthesizer`): Samantha, Daniel, Karen, Moira,
   Tessa, Rishi and friends. Novelty voices and non-English locales are hidden.
   The default is **Samantha**; the two bundled Piper voices (Amy, Ryan) are
   kept at the bottom as a fallback. **Speech → Refresh Voices** re-scans the
   system (e.g. after installing a voice in System Settings). The rate slider
-  (100–250 WPM) maps to Piper `length_scale`.
+  (100–250 WPM) maps to Piper `length_scale` and the neural models' `speed`.
 - **Document tabs** — open several files, switch between them, and close them
   with a save prompt for unsaved changes.
 - **Recent files** — the ten most recent files, persisted across launches.
@@ -156,6 +193,7 @@ The folder must contain the `piper` executable and a `voices/` subdirectory.
 | Close tab | `⌘W` |
 | Find | `⌘F` |
 | Speak / resume from selected line | `⌘↩` |
+| Skip to next paragraph | `⌥⌘→` |
 | Stop speaking | `⌘.` |
 | Editor pane | `⌘1` |
 | Viewer pane | `⌘2` |

@@ -4,6 +4,7 @@ import Darwin
 
 enum SpeechError: Error {
     case stopped
+    case skipped
     case engineMissing
     case renderFailed
     case playbackFailed
@@ -28,10 +29,14 @@ final class SpeechEngine {
     private let lock = NSLock()
     private var session = 0
     private var stopRequested = false
+    /// Bumped by skip(); a line whose token changed is dropped instead of played.
+    private var skipToken = 0
     private var prefetched: [String: PrefetchEntry] = [:]
     private var player: Process?
     private var inlineSynth: Process?
     private var inlineSynthesizer: AVSpeechSynthesizer?
+    /// Persistent Paradee/Kokoro helpers, keyed by family.
+    private var neuralServers: [String: NeuralServer] = [:]
 
     private let work = DispatchQueue(label: "com.mdviewer.speech.work")
     private let render = DispatchQueue(
@@ -106,8 +111,12 @@ final class SpeechEngine {
                     )
                 } catch {
                     if self.isStopped(mySession) { break }
-                    // Rendering failed for this line; continue with the next.
-                    NSLog("MDViewer TTS: line \(job.index + 1) failed: \(error)")
+                    if case SpeechError.skipped = error {
+                        // Skip: fall through and start the next line.
+                    } else {
+                        // Rendering failed for this line; continue with the next.
+                        NSLog("MDViewer TTS: line \(job.index + 1) failed: \(error)")
+                    }
                 }
 
                 if self.isStopped(mySession) { break }
@@ -137,11 +146,14 @@ final class SpeechEngine {
         inlineSynthesizer = nil
         let entries = Array(prefetched.values)
         prefetched.removeAll()
+        let servers = Array(neuralServers.values)
+        neuralServers.removeAll()
         lock.unlock()
 
         if let activePlayer { terminate(activePlayer) }
         if let activeSynth { terminate(activeSynth) }
         if let activeSynthesizer { activeSynthesizer.stopSpeaking(at: .immediate) }
+        for server in servers { server.terminate() }
 
         for entry in entries {
             lock.lock()
@@ -158,6 +170,19 @@ final class SpeechEngine {
             // Wake a worker blocked waiting for this render.
             entry.semaphore.signal()
         }
+    }
+
+    /// Skips the line/paragraph currently being read and continues with the
+    /// next one. Playback stops immediately; the reading session, its prefetch
+    /// queue and the warm neural helper all stay alive.
+    func skip() {
+        lock.lock()
+        skipToken += 1
+        let activePlayer = player
+        player = nil
+        lock.unlock()
+
+        if let activePlayer { terminate(activePlayer) }
     }
 
     // MARK: - Prefetch
@@ -237,6 +262,7 @@ final class SpeechEngine {
         lock.lock()
         let entry = prefetched[key]
         let stoppedBefore = stopRequested || session != mySession
+        let mySkip = skipToken
         lock.unlock()
 
         if stoppedBefore { throw SpeechError.stopped }
@@ -280,17 +306,22 @@ final class SpeechEngine {
 
         lock.lock()
         let stoppedNow = stopRequested || session != mySession
+        let skipped = skipToken != mySkip
         lock.unlock()
         if stoppedNow {
             try? FileManager.default.removeItem(atPath: path)
             throw SpeechError.stopped
         }
+        if skipped {
+            try? FileManager.default.removeItem(atPath: path)
+            throw SpeechError.skipped
+        }
 
         defer { try? FileManager.default.removeItem(atPath: path) }
-        try play(path: path, session: mySession)
+        try play(path: path, session: mySession, skip: mySkip)
     }
 
-    private func play(path: String, session mySession: Int) throws {
+    private func play(path: String, session mySession: Int, skip mySkip: Int) throws {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/afplay")
         process.arguments = [path]
@@ -304,23 +335,25 @@ final class SpeechEngine {
         }
 
         lock.lock()
-        let cancelled = stopRequested || session != mySession
-        if !cancelled { player = process }
+        let stopped = stopRequested || session != mySession
+        let skipped = skipToken != mySkip
+        if !stopped && !skipped { player = process }
         lock.unlock()
 
-        if cancelled {
+        if stopped || skipped {
             terminate(process)
-            throw SpeechError.stopped
+            throw stopped ? SpeechError.stopped : SpeechError.skipped
         }
 
         process.waitUntilExit()
 
         lock.lock()
         if player === process { player = nil }
+        let skippedNow = skipToken != mySkip
         lock.unlock()
 
         if process.terminationStatus != 0 {
-            throw SpeechError.playbackFailed
+            throw skippedNow ? SpeechError.skipped : SpeechError.playbackFailed
         }
     }
 
@@ -333,6 +366,28 @@ final class SpeechEngine {
         entry: PrefetchEntry,
         inline: Bool
     ) -> (path: String?, error: Error?) {
+        if voice.kind == .paradee || voice.kind == .kokoro {
+            let result = renderNeural(
+                text: text,
+                voice: voice,
+                rate: rate,
+                entry: entry,
+                inline: inline
+            )
+            if result.path != nil { return result }
+            if stoppedNow() { return result }
+
+            // Neural engine unavailable or failed: fall back to the default
+            // macOS voice rather than dropping the line.
+            return renderSystem(
+                text: text,
+                systemName: nil,
+                rate: rate,
+                entry: entry,
+                inline: inline
+            )
+        }
+
         if voice.kind == .piper, let model = voice.piperModel {
             let result = renderPiper(
                 text: text,
@@ -419,6 +474,85 @@ final class SpeechEngine {
             return (nil, stoppedNow() ? SpeechError.stopped : SpeechError.renderFailed)
         }
         return (output.path, nil)
+    }
+
+    private func renderNeural(
+        text: String,
+        voice: VoiceOption,
+        rate: Int,
+        entry: PrefetchEntry,
+        inline: Bool
+    ) -> (path: String?, error: Error?) {
+        let fm = FileManager.default
+        guard let key = voice.neuralVoice else { return (nil, SpeechError.engineMissing) }
+        let family = voice.kind == .kokoro ? "kokoro" : "paradee"
+        guard NeuralLocator.isReady(family: family) else {
+            return (nil, SpeechError.engineMissing)
+        }
+
+        let output = Self.tempFileURL(ext: "wav")
+        guard let server = neuralServer(for: family) else {
+            return (nil, SpeechError.engineMissing)
+        }
+        if inline {
+            lock.lock()
+            inlineSynth = server.process
+            lock.unlock()
+        }
+
+        let lang = key.hasPrefix("b") ? "en-gb" : "en-us"
+        do {
+            let ok = try server.render(
+                text: text,
+                voice: key,
+                speed: Self.neuralSpeed(rate),
+                lang: lang,
+                out: output.path
+            )
+            if inline {
+                lock.lock()
+                if inlineSynth === server.process { inlineSynth = nil }
+                lock.unlock()
+            }
+            if !ok || !fm.fileExists(atPath: output.path) {
+                try? fm.removeItem(at: output)
+                return (nil, stoppedNow() ? SpeechError.stopped : SpeechError.renderFailed)
+            }
+        } catch {
+            if inline {
+                lock.lock()
+                if inlineSynth === server.process { inlineSynth = nil }
+                lock.unlock()
+            }
+            dropNeuralServer(family, server)
+            try? fm.removeItem(at: output)
+            return (nil, stoppedNow() ? SpeechError.stopped : SpeechError.renderFailed)
+        }
+        return (output.path, nil)
+    }
+
+    /// Returns the warm helper for a family, starting it on first use.
+    private func neuralServer(for family: String) -> NeuralServer? {
+        // Holding the lock across creation serializes the concurrent prefetch
+        // requests, so only one helper (and one model load) is ever started.
+        lock.lock()
+        defer { lock.unlock() }
+        if let existing = neuralServers[family], existing.isRunning {
+            return existing
+        }
+        neuralServers.removeValue(forKey: family)
+        guard let server = NeuralServer(family: family) else { return nil }
+        neuralServers[family] = server
+        return server
+    }
+
+    private func dropNeuralServer(_ family: String, _ server: NeuralServer) {
+        lock.lock()
+        if neuralServers[family] === server {
+            neuralServers.removeValue(forKey: family)
+        }
+        lock.unlock()
+        server.terminate()
     }
 
     private func renderSystem(
@@ -607,6 +741,13 @@ final class SpeechEngine {
     private static func lengthScale(_ rate: Int) -> Double {
         guard rate > 0 else { return 1.0 }
         return max(0.5, min(2.0, 175.0 / Double(rate)))
+    }
+
+    /// Paradee/Kokoro take a direct speed multiplier (1.0 = normal), the
+    /// inverse of Piper's length scale.
+    private static func neuralSpeed(_ rate: Int) -> Double {
+        guard rate > 0 else { return 1.0 }
+        return max(0.5, min(2.0, Double(rate) / 175.0))
     }
 
     private static func tempFileURL(ext: String) -> URL {

@@ -43,6 +43,8 @@ keyboard shortcuts.
   - **macOS**: `AVSpeechSynthesizer` with downloaded Enhanced/Premium voices;
     bundled Piper neural TTS as fallback
   - **Windows**: Piper neural TTS (primary); Windows Speech API (SAPI) as fallback
+- Optional **Paradee** neural voices (4 English voices, ONNX Runtime, fully
+  offline) on both platforms; Kokoro-82M supported behind an opt-in flag
 - Multiple voice options (two bundled Piper voices: Amy and Ryan)
 - Adjustable speech rate (100-250 words per minute)
 - Click-to-select reading position
