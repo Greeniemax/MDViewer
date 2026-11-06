@@ -20,7 +20,7 @@ MDViewer is built using the Wails framework, which combines a Go backend with a 
 └──────────────────────┼──────────────────────┘
                        │
 ┌──────────────────────▼──────────────────────┐
-│           Go Backend (app.go)               │
+│           Go Backend (internal/mdviewer)               │
 │  ┌──────────┐  ┌──────────┐  ┌──────────┐  │
 │  │   File   │  │   TTS    │  │ Runtime  │  │
 │  │   I/O    │  │ Engine   │  │ Dialogs  │  │
@@ -32,7 +32,7 @@ MDViewer is built using the Wails framework, which combines a Go backend with a 
 
 ### Main Components
 
-#### `app.go`
+#### `internal/mdviewer/app.go`
 The main application file containing:
 
 **Type Definitions:**
@@ -203,17 +203,17 @@ Output: `build/bin/MDViewer.app`
 
 ### Adding a New Go Method
 
-1. Add method to `App` struct in `app.go`
+1. Add method to `App` struct in `internal/mdviewer/app.go`
 2. Ensure method is exported (capitalized name)
-3. Run `wails generate module` to update bindings
+3. Run `wails build` (or `wails dev`) to refresh bindings
 4. Import in `main.js`
 5. Call from frontend code
 
 ### Adding a New Feature
 
 1. **Backend changes** (if needed):
-   - Modify `app.go`
-   - Run `wails generate module`
+   - Modify `internal/mdviewer/`
+   - Run `wails build` (or `wails dev`) to refresh bindings
 
 2. **Frontend changes**:
    - Update `main.js` for logic

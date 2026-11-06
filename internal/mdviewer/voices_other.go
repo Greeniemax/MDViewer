@@ -1,6 +1,6 @@
 //go:build !windows
 
-package main
+package mdviewer
 
 // registryVoices is Windows-only; other platforms enumerate their system
 // voices with `say -v ?`.

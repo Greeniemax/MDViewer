@@ -1,7 +1,11 @@
 #!/bin/bash
 
-# MDViewer Build Script
-# This script builds the MDViewer application for production
+# MDViewer Build Script (Wails app)
+# This script builds the Wails desktop application for production.
+# The native macOS app is built separately with Mac/build.sh.
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
 
 echo "🔨 Building MDViewer..."
 echo ""
@@ -29,7 +33,7 @@ if [ $? -eq 0 ]; then
 
     # --- Bundle Piper into the .app ---
     echo "🔊 Bundling Piper TTS engine + voices..."
-    bash "$(dirname "$0")/scripts/fetch-piper.sh" || { echo "❌ Piper fetch failed"; exit 1; }
+    bash "$ROOT/scripts/fetch-piper.sh" || { echo "❌ Piper fetch failed"; exit 1; }
 
     case "$(uname -m)" in
       arm64|aarch64) PIPER_TARGET="darwin-arm64" ;;
@@ -46,7 +50,7 @@ if [ $? -eq 0 ]; then
 
     echo "📍 Application location: build/bin/MDViewer.app"
     echo ""
-    echo "To run the app, use: ./run.sh"
+    echo "To run the app, use: bash scripts/run.sh"
     echo "Or manually: open build/bin/MDViewer.app"
 else
     echo ""

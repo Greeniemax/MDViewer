@@ -97,17 +97,17 @@ Runtime and reuse the same prefetch/Stop pipeline as Piper. See
    ```bash
    git clone <repository-url>
    cd MDViewer
-   ./build.sh
+   bash scripts/build.sh
    ```
    
    **On Windows (PowerShell):**
    ```powershell
    git clone <repository-url>
    cd MDViewer
-   build.bat
+   scripts\build.bat
    ```
 
-   > **Note:** The build scripts (`build.sh` / `build.bat`) automatically run `scripts/fetch-piper.sh` or `scripts/fetch-piper.ps1` on the first run to download the Piper binary and voice models (~180 MB). An internet connection is required for this one-time step.
+   > **Note:** The build scripts (`scripts/build.sh` / `scripts/build.bat`) automatically run `scripts/fetch-piper.sh` or `scripts/fetch-piper.ps1` on the first run to download the Piper binary and voice models (~180 MB). An internet connection is required for this one-time step.
 
 4. The built app will be in:
    - **macOS**: `build/bin/MDViewer.app`
@@ -124,25 +124,25 @@ wails dev
 **macOS/Linux:**
 
 Two convenient shell scripts are provided:
-- **`./build.sh`** - Builds the production application
-- **`./run.sh`** - Launches the built application
+- **`scripts/build.sh`** - Builds the production application
+- **`scripts/run.sh`** - Launches the built application
 
 ```bash
 # Build and run
-./build.sh
-./run.sh
+bash scripts/build.sh
+bash scripts/run.sh
 ```
 
 **Windows:**
 
 Two convenient batch files are provided:
-- **`build.bat`** - Builds the production application
-- **`run.bat`** - Launches the built application
+- **`scripts\build.bat`** - Builds the production application
+- **`scripts\run.bat`** - Launches the built application
 
 ```batch
 REM Build and run
-build.bat
-run.bat
+scripts\build.bat
+scripts\run.bat
 ```
 
 Or use Wails commands directly:
@@ -195,18 +195,25 @@ Currently, all actions are toolbar-based. Future versions may include keyboard s
 
 ```
 MDViewer/
-├── app.go                  # Main Go application and TTS logic
-├── pdf.go                  # HTML-to-PDF export via Edge/Chrome headless
-├── frontend/
-│   ├── src/
-│   │   ├── main.js         # Frontend application logic
-│   │   ├── app.css         # Main styles
-│   │   └── style.css       # Base styles
-│   ├── index.html          # HTML structure
-│   └── package.json        # Frontend dependencies
-├── build/                  # Build output directory
-├── wails.json              # Wails configuration
-└── go.mod                  # Go dependencies
+├── main.go                 # Wails entry point + embedded frontend assets
+├── internal/
+│   ├── mdviewer/           # Application logic (editor, TTS, PDF, file watching)
+│   │   ├── app.go
+│   │   ├── tts_neural.go
+│   │   ├── tts_pipeline.go / tts_piper.go
+│   │   ├── pdf.go / filewatch.go
+│   │   └── voices_*.go / winproc_*.go
+│   └── tts/                # Pure voice-selector and rate helpers
+├── frontend/               # Vanilla JS UI (Vite)
+├── Mac/                    # Native SwiftUI macOS app (SwiftPM)
+├── tools/neural-tts/       # Shared ONNX helper (Paradee/Kokoro)
+├── scripts/                # Build/run scripts and asset fetchers
+├── resources/              # Fetched Piper + neural assets (gitignored)
+├── testdata/sample.md      # Sample document for manual testing
+├── Docs/                   # Documentation (screenshot under Docs/assets)
+├── build/                  # Build output
+├── go.mod / go.sum
+└── wails.json
 ```
 
 ## Design Specifications
@@ -297,7 +304,7 @@ This is a personal/educational project. Feel free to fork and modify for your ne
 
 ## Screenshot
 
-![MDViewer Application](screenshot.png) 
+![MDViewer Application](Docs/assets/screenshot.png) 
 
 *MDViewer showing the MD Viewer tab with text-to-speech controls and rendered markdown content*
 

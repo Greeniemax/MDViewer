@@ -1,6 +1,8 @@
 # Build outputs
 build/bin
 build/windows
+# Accidental Linux binary committed before the layout cleanup
+/MDViewer
 
 # Frontend
 node_modules

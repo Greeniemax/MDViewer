@@ -1,4 +1,4 @@
-package main
+package mdviewer
 
 import (
 	"bufio"
@@ -98,9 +98,9 @@ func (a *App) resolveNeural() *neuralAssets {
 		}
 
 		assets := &neuralAssets{
-			dir:        abs,
-			exe:        exePath,
-			ort:        ortPath,
+			dir: abs,
+			exe: exePath,
+			ort: ortPath,
 			espeakDLL: firstExisting(
 				filepath.Join(abs, "espeak-ng.dll"),
 				filepath.Join(abs, "libespeak-ng.1.dylib"),

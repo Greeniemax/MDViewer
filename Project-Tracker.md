@@ -36,31 +36,35 @@
 ## Project Structure
 ```
 MDViewer/
-├── app.go                    # Main Go application (TTS logic)
-├── pdf.go                    # HTML -> PDF export via Edge/Chrome headless
-├── go.mod / go.sum           # Dependencies
-├── wails.json                # Wails configuration
-├── frontend/
-│   ├── src/
-│   │   ├── main.js           # Frontend logic (565 lines)
-│   │   ├── app.css          # Main styles
-│   │   └── style.css        # Base styles
+├── main.go                   # Wails entry point + //go:embed frontend/dist
+├── internal/
+│   ├── mdviewer/             # App logic: editor, TTS, PDF, file watching
+│   │   ├── app.go
+│   │   ├── tts_neural.go / tts_pipeline.go / tts_piper.go
+│   │   ├── pdf.go / filewatch.go
+│   │   └── voices_*.go / winproc_*.go
+│   └── tts/                  # Pure voice-selector + rate helpers
+├── frontend/                 # Vanilla JS UI (Vite)
+│   ├── src/main.js
 │   ├── index.html
-│   ├── dist/                 # Built frontend assets
-│   └── package.json
-├── Docs/                     # 20 development documentation files
-├── Mac/                      # Native macOS Swift port (SwiftPM + AppKit/SwiftUI)
-│   ├── Sources/MDViewer/     # app, editor, viewer, markdown parser, TTS engine
-│   ├── Sources/MDViewer/PDFExport.swift  # markdown -> attributed string -> PDF
-│   ├── Sources/MDViewer/NeuralEngine.swift  # Paradee/Kokoro helper client
-│   ├── build.sh              # builds MDViewer.app, bundles Piper + neural, ad-hoc signs
+│   └── wailsjs/              # Generated bindings (go/mdviewer)
+├── Mac/                      # Native SwiftUI macOS app (SwiftPM)
+│   ├── Sources/MDViewer/     # app, editor, viewer, markdown, TTS, PDF
+│   │   └── NeuralEngine.swift  # Paradee/Kokoro helper client
+│   ├── build.sh              # builds MDViewer.app, bundles Piper + neural
 │   ├── register.sh           # installs to /Applications, default .md handler
-│   └── README.md             # macOS build/run instructions
+│   └── README.md
 ├── tools/neural-tts/         # Go ONNX helper (Paradee/Kokoro, serve mode)
-├── scripts/fetch-neural.sh   # macOS neural assets (model + ORT + espeak links)
-├── resources/neural/         # fetched model/config/ORT (gitignored assets)
+├── scripts/                  # build/run + fetch-piper/fetch-neural
+├── resources/                # fetched Piper + neural assets (gitignored)
+├── testdata/sample.md        # Sample document
+├── Docs/                     # Documentation (screenshot in Docs/assets)
 ├── build/                    # Build output
-└── README.md
+├── go.mod / go.sum
+├── wails.json
+├── README.md
+├── LICENSE
+└── Project-Tracker.md
 ```
 
 ## Key Documentation
@@ -93,6 +97,24 @@ MDViewer/
 ## Activity Log
 
 ### 2026-11-06
+- **Repository layout cleanup.** The root now holds only the Wails entry point
+  and project metadata; everything else moved into folders.
+  - Go app logic moved from the root into `internal/mdviewer` (package
+    `mdviewer`, `Run(assets fs.FS)`); the new root `main.go` keeps the
+    `//go:embed all:frontend/dist` directive and calls `mdviewer.Run`. Wails
+    still builds from the project root.
+  - Bindings regenerated as `frontend/wailsjs/go/mdviewer` and the import in
+    `frontend/src/main.js` updated; the old `go/main` directory is gone.
+  - `build.sh`, `build.bat`, `run.sh`, `run.bat`, `resume.sh` moved to
+    `scripts/` (they cd to the repo root, so paths still resolve). Docs use
+    `bash scripts/build.sh` / `scripts\build.bat`.
+  - `screenshot.png` → `Docs/assets/screenshot.png`; `test_sample.md` →
+    `testdata/sample.md`.
+  - Removed an accidental 5 MB Linux `MDViewer` ELF binary from the repo and
+    added `/MDViewer` to `.gitignore`.
+  - Verified `go build ./...` for darwin and windows, and regenerated the
+    Wails bindings locally.
+
 - **Paradee neural TTS on macOS.** Ported the Windows neural helper to the native
   Mac app; the two platforms now share `tools/neural-tts` (Go + cgo + ONNX
   Runtime) and differ only in how espeak and the assets are bundled.

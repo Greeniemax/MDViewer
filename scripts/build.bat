@@ -1,6 +1,7 @@
 @echo off
 setlocal EnableExtensions
-cd /d "%~dp0"
+set "ROOT=%~dp0.."
+cd /d "%ROOT%"
 
 if not exist "wails.json" (
     echo [ERROR] Run this from the MDViewer project folder ^(wails.json not found^).
@@ -23,7 +24,7 @@ if errorlevel 1 (
 )
 
 echo Building MDViewer ^(frontend + bindings + Go embed^)...
-pushd "%~dp0frontend"
+pushd "%ROOT%\frontend"
 
 REM node_modules may be absent (fresh clone) or installed for another OS
 REM (e.g. via WSL on this same folder), which lacks the Windows vite.cmd shim
@@ -59,16 +60,16 @@ if errorlevel 1 (
 )
 
 echo Bundling Piper TTS engine + voices...
-powershell -ExecutionPolicy Bypass -File "%~dp0scripts\fetch-piper.ps1"
+powershell -ExecutionPolicy Bypass -File "%~dp0fetch-piper.ps1"
 if errorlevel 1 (
     echo [ERROR] Piper fetch failed.
     exit /b 1
 )
-set "PIPER_OUT=%~dp0build\bin\piper"
+set "PIPER_OUT=%ROOT%\build\bin\piper"
 if not exist "%PIPER_OUT%\voices" mkdir "%PIPER_OUT%\voices"
-xcopy /E /I /Y "%~dp0resources\piper\engine\windows\piper" "%PIPER_OUT%" >nul
-copy /Y "%~dp0resources\piper\voices\*.onnx" "%PIPER_OUT%\voices\" >nul
-copy /Y "%~dp0resources\piper\voices\*.onnx.json" "%PIPER_OUT%\voices\" >nul
+xcopy /E /I /Y "%ROOT%\resources\piper\engine\windows\piper" "%PIPER_OUT%" >nul
+copy /Y "%ROOT%\resources\piper\voices\*.onnx" "%PIPER_OUT%\voices\" >nul
+copy /Y "%ROOT%\resources\piper\voices\*.onnx.json" "%PIPER_OUT%\voices\" >nul
 echo Piper bundled at %PIPER_OUT%
 
 echo Building neural TTS helper...
@@ -77,14 +78,14 @@ if errorlevel 1 (
     echo [ERROR] gcc is required to build the neural TTS helper ^(MinGW^).
     exit /b 1
 )
-powershell -ExecutionPolicy Bypass -File "%~dp0scripts\fetch-neural.ps1"
+powershell -ExecutionPolicy Bypass -File "%~dp0fetch-neural.ps1"
 if errorlevel 1 (
     echo [ERROR] Neural asset fetch failed.
     exit /b 1
 )
-set "NEURAL_OUT=%~dp0build\bin\neural"
+set "NEURAL_OUT=%ROOT%\build\bin\neural"
 if not exist "%NEURAL_OUT%" mkdir "%NEURAL_OUT%"
-pushd "%~dp0tools\neural-tts"
+pushd "%ROOT%\tools\neural-tts"
 set CGO_ENABLED=1
 go build -o "%NEURAL_OUT%\neural-tts.exe" .
 if errorlevel 1 (
@@ -93,18 +94,18 @@ if errorlevel 1 (
     exit /b 1
 )
 popd
-copy /Y "%~dp0resources\neural\paradee_int8.onnx" "%NEURAL_OUT%\" >nul
-copy /Y "%~dp0resources\neural\paradee-config.json" "%NEURAL_OUT%\" >nul
-copy /Y "%~dp0resources\neural\onnxruntime.dll" "%NEURAL_OUT%\" >nul
-copy /Y "%~dp0resources\neural\espeak-ng.dll" "%NEURAL_OUT%\" >nul
+copy /Y "%ROOT%\resources\neural\paradee_int8.onnx" "%NEURAL_OUT%\" >nul
+copy /Y "%ROOT%\resources\neural\paradee-config.json" "%NEURAL_OUT%\" >nul
+copy /Y "%ROOT%\resources\neural\onnxruntime.dll" "%NEURAL_OUT%\" >nul
+copy /Y "%ROOT%\resources\neural\espeak-ng.dll" "%NEURAL_OUT%\" >nul
 if "%MDVIEWER_NEURAL_KOKORO%"=="1" (
-    copy /Y "%~dp0resources\neural\kokoro-v1.0.int8.onnx" "%NEURAL_OUT%\" >nul
-    copy /Y "%~dp0resources\neural\voices-v1.0.bin" "%NEURAL_OUT%\" >nul
+    copy /Y "%ROOT%\resources\neural\kokoro-v1.0.int8.onnx" "%NEURAL_OUT%\" >nul
+    copy /Y "%ROOT%\resources\neural\voices-v1.0.bin" "%NEURAL_OUT%\" >nul
 )
-copy /Y "%~dp0resources\neural\kokoro-config.json" "%NEURAL_OUT%\" >nul
+copy /Y "%ROOT%\resources\neural\kokoro-config.json" "%NEURAL_OUT%\" >nul
 echo Neural TTS bundled at %NEURAL_OUT%
 
 echo.
-echo OK:  %~dp0build\bin\MDViewer.exe
+echo OK:  %ROOT%\build\bin\MDViewer.exe
 endlocal
 exit /b 0

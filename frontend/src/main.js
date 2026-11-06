@@ -16,7 +16,7 @@ import {
     Stop, 
     IsSpeaking,
     GetAvailableVoices 
-} from '../wailsjs/go/main/App';
+} from '../wailsjs/go/mdviewer/App';
 
 const RECENT_FILES_KEY = 'mdviewer-recent-files-v1';
 const MAX_RECENT_FILES = 10;

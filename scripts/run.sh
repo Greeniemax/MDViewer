@@ -1,7 +1,10 @@
 #!/bin/bash
 
-# MDViewer Run Script
-# This script runs the built MDViewer application
+# MDViewer Run Script (Wails app)
+# This script runs the built Wails application.
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
 
 APP_PATH="build/bin/MDViewer.app"
 
@@ -12,7 +15,7 @@ if [ ! -d "$APP_PATH" ]; then
     echo "❌ Error: MDViewer.app not found at $APP_PATH"
     echo ""
     echo "Please build the application first:"
-    echo "  ./build.sh"
+    echo "  bash scripts/build.sh"
     echo ""
     echo "Or run in development mode:"
     echo "  wails dev"

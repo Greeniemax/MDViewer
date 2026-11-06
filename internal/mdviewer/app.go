@@ -1,9 +1,9 @@
-package main
+package mdviewer
 
 import (
 	"context"
-	"embed"
 	"encoding/json"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,9 +19,6 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
-
-//go:embed all:frontend/dist
-var assets embed.FS
 
 // App struct
 type App struct {
@@ -704,7 +701,10 @@ func voiceBaseName(label string) string {
 	return strings.ToLower(strings.TrimSpace(base))
 }
 
-func main() {
+// Run starts the Wails application. The embedded frontend assets are passed
+// in by the root main package, which keeps the Go main function (and the
+// //go:embed directive) at the project root as Wails expects.
+func Run(assets fs.FS) {
 	app := NewApp()
 
 	err := wails.Run(&options.App{

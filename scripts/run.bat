@@ -1,4 +1,5 @@
 @echo off
+cd /d "%~dp0.."
 echo ========================================
 echo MDViewer - Launching Application
 echo ========================================
@@ -8,7 +9,7 @@ REM Check if the executable exists
 if not exist "build\bin\MDViewer.exe" (
     echo ERROR: MDViewer.exe not found!
     echo.
-    echo Please build the application first using 'build.bat'
+    echo Please build the application first using 'scripts\build.bat'
     echo.
     pause
     exit /b 1
